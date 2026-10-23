@@ -6,9 +6,10 @@ import { db } from "@/lib/db";
 import { encodeAIMeta } from "@/lib/versionMeta";
 import { buildPlannerContext, type PlanResult } from "@/lib/ai/plan";
 import { buildPatch, sceneSnapshot, type PatchCandidate } from "@/lib/scene/patch";
-import { nodeGeometry, relayoutScene, untouchedSince } from "@/lib/scene/relayout";
+import { layoutFingerprint, relayoutScene, untouchedSince } from "@/lib/scene/relayout";
 import type { ExcalidrawElement } from "@/types/diagram";
 import { canAutoApply } from "@/lib/scene/auto-draw";
+import { recentInstructions } from "@/lib/scene/speech";
 import type { ExcalidrawCanvasHandle } from "@/components/editor/ExcalidrawCanvas";
 import type { Diagram } from "@/types/library";
 import type { UserSettings } from "@/hooks/useUserSettings";
@@ -48,7 +49,7 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
   const abortRef = useRef<AbortController | null>(null);
   // node geometry as the AI last left it; any manual move or drawing switches to "keep my arrangement"
   const aiLayoutRef = useRef<Map<string, string> | null>(null);
-  const markAiLayout = (scene: readonly ExcalidrawElement[]) => { aiLayoutRef.current = nodeGeometry(scene); };
+  const markAiLayout = (scene: readonly ExcalidrawElement[]) => { aiLayoutRef.current = layoutFingerprint(scene); };
   const applyingRef = useRef(false);
 
   useEffect(() => () => abortRef.current?.abort(), [id]);
@@ -77,7 +78,7 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instruction,
-          context: buildPlannerContext(base, canvas.getSelectedIds()),
+          context: { ...buildPlannerContext(base, canvas.getSelectedIds()), recentInstructions: recentInstructions(diagram.transcript) },
           providerConfig: settings.apiKey ? { provider: settings.provider, apiKey: settings.apiKey } : undefined,
         }),
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
@@ -218,7 +219,7 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
     }
     const result = relayoutScene(canvas.getElements());
     if (!result) {
-      setNotice({ kind: "info", text: "Nothing to tidy here (diagrams with groups keep their layout)." });
+      setNotice({ kind: "info", text: "Nothing to tidy here. Diagrams with groups, frames, locked or rotated shapes keep their layout." });
       return;
     }
     canvas.applyPatch(result.elements, result.movedIds);

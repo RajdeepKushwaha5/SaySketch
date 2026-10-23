@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
+import { isCompleteThought } from "@/lib/scene/speech";
 
 const SPEED_PRESETS = { fast: 800, normal: 1200, slow: 1800 } as const;
 export type SpeechSpeed = keyof typeof SPEED_PRESETS;
@@ -36,7 +37,6 @@ const SYSARCH_REGEX_REPLACEMENTS: [RegExp, string][] = [
   [/\bdynamo\s*db\b/gi, "DynamoDB"],
   [/\bfire\s*base\b/gi, "Firebase"],
   [/\bver\s*cel\b/gi, "Vercel"],
-  [/\btraffic\b/gi, "Traefik"], // ASR: "Traefik" → "traffic"
   [/\bpost\s*gres\s*(sql)?\b/gi, "PostgreSQL"],
   [/\bpostgresql\s+sql\b/gi, "PostgreSQL"],
   [/\bL\.?R\.?M\b/g, "LLM"],
@@ -63,6 +63,8 @@ export function useDeepgram(
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const stoppingRef = useRef(false);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalTranscriptRef = useRef("");
   const onSilenceRef = useRef(onSilence);
@@ -72,8 +74,10 @@ export function useDeepgram(
   onErrorRef.current = onError;
 
   const teardown = useCallback(() => {
+    if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+    stoppingRef.current = false;
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    mediaRecorderRef.current?.stop();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") mediaRecorderRef.current.stop();
     mediaRecorderRef.current = null;
     wsRef.current?.close();
     wsRef.current = null;
@@ -90,7 +94,7 @@ export function useDeepgram(
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(() => {
       if (session !== activeSessionRef.current) return;
-      if (finalTranscriptRef.current.trim()) {
+      if (finalTranscriptRef.current.trim() && isCompleteThought(finalTranscriptRef.current)) {
         onSilenceRef.current(finalTranscriptRef.current);
         finalTranscriptRef.current = "";
         setFinalTranscript("");
@@ -100,21 +104,22 @@ export function useDeepgram(
 
   const start = useCallback(async () => {
     teardown();
+    finalTranscriptRef.current = "";
 
     const session = ++activeSessionRef.current;
 
     try {
-      const res = await fetch("/api/deepgram-token");
-      const { key, error } = await res.json();
-      if (error) throw new Error(error);
-      if (session !== activeSessionRef.current) return;
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (session !== activeSessionRef.current) {
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
       streamRef.current = stream;
+      // Mint only after permission is granted: a short-lived key can expire in the permission dialog.
+      const res = await fetch("/api/deepgram-token");
+      const { key, error } = await res.json();
+      if (!res.ok || error || typeof key !== "string") throw new Error(error || "Speech service unavailable");
+      if (session !== activeSessionRef.current) return;
       setIsListening(true); // UI: mic live before WS open
 
       const params = new URLSearchParams({
@@ -158,12 +163,25 @@ export function useDeepgram(
         const data = JSON.parse(event.data);
 
         if (data.type === "UtteranceEnd") {
-          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-          if (finalTranscriptRef.current.trim()) {
+          // Deepgram has already waited ~1 s of silence. A complete sentence goes now (no second wait);
+          // an unfinished clause ("...connects to") stays buffered for the rest of the thought.
+          if (finalTranscriptRef.current.trim() && isCompleteThought(finalTranscriptRef.current)) {
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
             onSilenceRef.current(finalTranscriptRef.current);
             finalTranscriptRef.current = "";
             setFinalTranscript("");
+          } else {
+            resetSilenceTimer(session);
           }
+          return;
+        }
+        if (data.type === "Metadata" && stoppingRef.current) {
+          const pending = finalTranscriptRef.current.trim();
+          finalTranscriptRef.current = "";
+          if (pending) onSilenceRef.current(pending);
+          activeSessionRef.current++;
+          teardown();
+          setFinalTranscript("");
           return;
         }
 
@@ -183,6 +201,8 @@ export function useDeepgram(
           setInterimTranscript("");
           resetSilenceTimer(session);
         } else {
+          // Speech resumed before the correction window elapsed; do not commit its earlier half yet.
+          if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
           setInterimTranscript(transcript);
         }
       };
@@ -191,6 +211,7 @@ export function useDeepgram(
         if (session === activeSessionRef.current) teardown();
       };
       ws.onclose = (e) => {
+        if (session !== activeSessionRef.current) return;
         // 1005: no status — normal when we close the socket
         if (
           e.code !== 1000 &&
@@ -202,7 +223,12 @@ export function useDeepgram(
           );
           onErrorRef.current?.("mic error — check browser permissions");
         }
-        if (session === activeSessionRef.current) setIsListening(false);
+        const pending = finalTranscriptRef.current.trim();
+        finalTranscriptRef.current = "";
+        if (pending) onSilenceRef.current(pending);
+        activeSessionRef.current++;
+        teardown();
+        setFinalTranscript("");
       };
     } catch (err) {
       console.error("Failed to start Deepgram", err);
@@ -211,14 +237,29 @@ export function useDeepgram(
         onErrorRef.current?.("mic error — check browser permissions");
       }
     }
-  }, [teardown, resetSilenceTimer]);
+  }, [teardown, resetSilenceTimer, boostTechTerms]);
 
   const stop = useCallback(() => {
-    activeSessionRef.current++;
-    teardown();
-    // no final flush: UtteranceEnd/silence already emitted; stop races last WS frames
-    finalTranscriptRef.current = "";
-    setFinalTranscript("");
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    const ws = wsRef.current;
+    const recorder = mediaRecorderRef.current;
+    const finish = () => {
+      const pending = finalTranscriptRef.current.trim();
+      finalTranscriptRef.current = "";
+      if (pending) onSilenceRef.current(pending);
+      activeSessionRef.current++;
+      teardown();
+      setFinalTranscript("");
+    };
+    stopTimerRef.current = setTimeout(finish, 2500);
+    // Deliver the recorder's last audio blob before asking the socket to finalize.
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = () => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "CloseStream" })); };
+      recorder.stop();
+    } else if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "CloseStream" }));
+    else finish();
   }, [teardown]);
 
   const reset = useCallback(() => {
@@ -228,8 +269,9 @@ export function useDeepgram(
   }, []);
 
   useEffect(() => {
+    const session = activeSessionRef;
     return () => {
-      activeSessionRef.current++;
+      session.current++;
       teardown();
     };
   }, [teardown]);

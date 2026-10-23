@@ -210,7 +210,6 @@ export default function EditorPage({ params }: Props) {
             diagramId={id}
             diagramType={diagram.diagramType}
             isLoading={isLoading}
-            onSilence={(text) => void submitInstruction(text)}
             onSubmit={submitInstruction}
             autoDraw={autoDraw}
             onAutoDrawChange={setAutoDraw}

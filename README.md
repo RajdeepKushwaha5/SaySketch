@@ -26,7 +26,15 @@ Review the proposed change and select **Apply**. Click the canvas and press **Ct
 - Import editable backups and export .excalidraw, JSON, PNG and SVG.
 - Copy supported graph structure as Mermaid for documentation.
 
-Ordinary instruction edits do not run a full-scene layout. New components are placed without moving unrelated content. Ambiguous instructions, unsupported edits and placement failures can require clarification or manual adjustment.
+**Layout.** Until you arrange anything by hand, every applied change re-lays out the whole diagram the same way initial creation does, so it stays tidy as it grows. The proposal says when this will happen. Once you move a shape, bend an arrow or draw something, your arrangement is preserved: new components are placed beside related ones and nothing else moves. **Tidy up** in the top bar re-lays out on demand; one Ctrl/Cmd+Z restores your layout. Tidying is skipped for diagrams with groups, frames, or locked or rotated shapes. Ambiguous instructions, unsupported edits and placement failures can require clarification or manual adjustment.
+
+## Live mic
+
+When the server has Deepgram configured (`DEEPGRAM_ENABLED=1`, `DEEPGRAM_API_KEY`, `DEEPGRAM_PROJECT_ID`), a mic button appears in the editor. After a short pause, complete thoughts are submitted; unfinished clauses stay buffered for the next words. Resumed speech postpones submission so a quick correction can stay with its original sentence. Fast / normal / slow controls the pause window. Additions and renames apply as you go; deletions still require review. Stop briefly waits for final transcript events before closing the microphone.
+
+Follow-up requests include up to six recent accepted instruction fragments, bounded to 6,000 characters, alongside the current graph. This helps resolve references and corrections across chunks. Current scene content remains authoritative after manual edits or undo. Initial creation and incremental edits represent hosting through provider nodes and labelled connections unless a grouping boundary is explicitly requested.
+
+The speech-token endpoint uses shared rate limiting when configured and fails closed if that limiter is unavailable. Without shared configuration it retains local-process limits, so public access still requires deployment-level protection and provider spend controls.
 
 ## Using Wispr Flow
 
@@ -36,7 +44,7 @@ Ordinary instruction edits do not run a full-scene layout. New components are pl
 
 **Auto draw** submits after text stops changing for 1.8 seconds. It draws an initial description and automatically applies validated additions and renames. Deletions still require review. Turn it off when you want to compose without submitting on a pause.
 
-This mode responds to inserted text, including typing and paste. If Flow inserts text when you finish dictating, drawing starts after that insertion. Keep the instruction box focused while speaking.
+This mode responds to inserted text, including typing and paste. If Flow inserts text when you finish dictating, drawing starts after that insertion. Keep the instruction box focused while speaking. Anything you dictate while a change is still being planned stays in the box and is sent next, once; nothing is re-sent.
 
 **Shift+Enter** inserts a new line. Failed instructions remain available for correction or retry.
 
@@ -136,7 +144,7 @@ Flow inserts text into the composer through the desktop app. It does not connect
 
 ### How an instruction becomes an edit
 
-Initial creation uses automatic layout. Later instructions operate on the current scene through bounded patches.
+Initial creation uses automatic layout. Later instructions operate on the current scene through bounded patches, tidied with the same layout until the user arranges something by hand.
 
 ```mermaid
 flowchart TD

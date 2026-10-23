@@ -13,6 +13,15 @@ const scene: ExcalidrawElement[] = [
 const ctx = buildPlannerContext(scene, ["api-t", "note", "e1"]);
 
 describe("planner context", () => {
+  it("carries bounded previous wording without changing the live graph", () => {
+    const enriched = parsePlannerContext({ ...ctx, recentInstructions: ["Spring Boot writes to Postgres", "Actually use MongoDB instead"] });
+    const messages = plannerMessages("Connect it to storage", enriched);
+    expect(messages[1].content).toContain("Spring Boot writes to Postgres");
+    expect(messages[0].content).toContain("Never replay them");
+    expect(enriched.nodes).toEqual(ctx.nodes);
+    expect(() => parsePlannerContext({ ...ctx, recentInstructions: Array(7).fill("x") })).toThrow("conversation");
+    expect(() => parsePlannerContext({ ...ctx, recentInstructions: [42] })).toThrow("conversation");
+  });
   it("holds semantic IDs and labels only, resolving selected labels to their shapes", () => {
     expect(ctx).toEqual({
       nodes: [{ id: "api", label: "API" }, { id: "db", label: "DB" }],

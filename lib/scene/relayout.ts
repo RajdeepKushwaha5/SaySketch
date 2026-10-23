@@ -20,10 +20,13 @@ const SPACING = { LR: { nodesep: 60, ranksep: 120 }, TB: { nodesep: 80, ranksep:
 export function relayoutScene(scene: readonly ExcalidrawElement[]): { elements: ExcalidrawElement[]; movedIds: string[] } | null {
   const live = scene.filter(el => !el.isDeleted);
   // group backgrounds are sized around their members; moving members would break them
-  if (live.some(el => el.customData?.yapdraw?.type === "group")) return null;
+  if (live.some(el => el.customData?.yapdraw?.type === "group" || el.type === "frame" || el.type === "magicframe")) return null;
   const index = reconcileScene(live);
   if (index.nodes.length < 2) return null;
   const byId = new Map(live.map(el => [el.id, el]));
+  // never move what the user pinned or structured: locked, grouped, framed or rotated nodes/arrows/labels
+  const movable = [...index.nodes, ...index.edges].flatMap(item => [item.id, ...(item.textId ? [item.textId] : [])]).map(id => byId.get(id)!);
+  if (movable.some(el => el.locked || (Array.isArray(el.groupIds) && el.groupIds.length > 0) || el.frameId || (el.angle ?? 0) !== 0)) return null;
 
   const xs = index.nodes.map(n => centre(byId.get(n.id)!).x);
   const ys = index.nodes.map(n => centre(byId.get(n.id)!).y);
@@ -93,20 +96,31 @@ export function relayoutScene(scene: readonly ExcalidrawElement[]): { elements: 
   return { elements: scene.map(el => updates.get(el.id) ?? el), movedIds: [...updates.keys()] };
 }
 
-/** Node geometry fingerprint, used to tell whether the user has arranged anything since the last AI layout. */
-export function nodeGeometry(scene: readonly ExcalidrawElement[]): Map<string, string> {
-  const index = reconcileScene(scene.filter(el => !el.isDeleted));
-  const byId = new Map(scene.map(el => [el.id, el]));
-  return new Map(index.nodes.map(n => {
+/**
+ * Fingerprint of everything a tidy would move: node boxes and arrow routes. Labels are bound to their
+ * shapes/arrows and follow them, so they need no tracking. Any difference means the user arranged something.
+ */
+export function layoutFingerprint(scene: readonly ExcalidrawElement[]): Map<string, string> {
+  const live = scene.filter(el => !el.isDeleted);
+  const index = reconcileScene(live);
+  const byId = new Map(live.map(el => [el.id, el]));
+  const r = (n: unknown) => Math.round(Number(n) || 0);
+  const entries: [string, string][] = index.nodes.map(n => {
     const el = byId.get(n.id)!;
-    return [n.id, `${Math.round(el.x ?? 0)},${Math.round(el.y ?? 0)},${Math.round(el.width ?? 0)},${Math.round(el.height ?? 0)}`];
-  }));
+    return [n.id, `${r(el.x)},${r(el.y)},${r(el.width)},${r(el.height)}`];
+  });
+  for (const e of index.edges) {
+    const el = byId.get(e.id)!;
+    const pts = (Array.isArray(el.points) ? el.points : []).map((p: number[]) => `${r(p[0])}:${r(p[1])}`).join(" ");
+    entries.push([e.id, `${r(el.x)},${r(el.y)} ${pts}`]);
+  }
+  return new Map(entries);
 }
 
-/** True when every node the AI laid out is still where it put it and nothing was added by hand. */
+/** True when every node and arrow the AI laid out is still where it put it and nothing was added by hand. */
 export function untouchedSince(layout: Map<string, string> | null, scene: readonly ExcalidrawElement[]): boolean {
   if (!layout) return false;
-  const now = nodeGeometry(scene);
+  const now = layoutFingerprint(scene);
   if (now.size !== layout.size) return false;
   for (const [id, geo] of now) if (layout.get(id) !== geo) return false;
   const live = scene.filter(el => !el.isDeleted);

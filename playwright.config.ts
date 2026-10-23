@@ -8,7 +8,11 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Inv
 export default defineConfig({
   testDir: "e2e",
   timeout: 120_000,
-  use: { baseURL: `http://localhost:${port}`, viewport: { width: 1440, height: 900 }, trace: "retain-on-failure" },
+  use: {
+    baseURL: `http://localhost:${port}`, viewport: { width: 1440, height: 900 }, trace: "retain-on-failure",
+    // a fake microphone for the live-mic test; harmless elsewhere
+    launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+  },
   webServer: {
     command: `"${process.execPath}" "${path.join(process.cwd(), "node_modules/next/dist/bin/next")}" dev --webpack -p ${port}`,
     url: `http://localhost:${port}`,

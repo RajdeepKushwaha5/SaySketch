@@ -9,8 +9,11 @@ export function canAutoApply(operations: readonly SceneOperation[]): boolean {
   );
 }
 
-export function scheduleAutoDraw(submit: () => void): () => void {
-  const timer = setTimeout(submit, AUTO_DRAW_PAUSE_MS);
+/** The live mic has already detected the pause, so its utterances go out almost immediately. */
+export const LIVE_MIC_SEND_MS = 250;
+
+export function scheduleAutoDraw(submit: () => void, delayMs = AUTO_DRAW_PAUSE_MS): () => void {
+  const timer = setTimeout(submit, delayMs);
   return () => clearTimeout(timer);
 }
 

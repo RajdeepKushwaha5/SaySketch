@@ -36,7 +36,7 @@ const BASE_PROMPT = `You are a diagram generator. Convert natural language descr
 
 ## groups
 Background zones. Use when nodes cluster into a distinct logical group — layers, teams, phases, or hosting boundaries.
-- When the user mentions hosting (e.g. "hosted on GCP", "running in AWS", "on Vercel"), create a group wrapping the relevant nodes with the provider's icon slug
+- For hosting, create a provider node connected to the component it hosts, labelled "hosts". For CI/CD, connect the pipeline node to its deployment target, labelled "deploys". Do not infer unrelated connections. Create a hosting group only when the user explicitly requests a group or boundary.
 - "color": must be one of the named colors above — never hex
 
 ## Topology rules — CRITICAL

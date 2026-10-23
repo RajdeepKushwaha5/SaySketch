@@ -39,16 +39,16 @@ async function drag(page: Page, id: string, dx: number, dy: number) {
 }
 
 /** Open a new diagram and generate the three-node fixture through the real client pipeline (model stubbed). */
-async function generate(page: Page, g: GraphResponse = graph) {
+async function generate(page: Page, g: GraphResponse = graph, instruction = "Draw web, API and database") {
   const { elements } = layoutGraph(g);
   await page.route("**/api/generate-diagram", route => route.fulfill({ json: { elements, graph: g, files: [] } }));
   await page.goto("/d/new");
   // dev builds compile on first visit; wait for the canvas API before typing
   await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
   const composer = page.getByTestId("composer");
-  await composer.fill("Draw web, API and database");
+  await composer.fill(instruction);
   await composer.press("Enter");
-  await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow").length, { timeout: 30_000 }).toBe(2);
+  await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow").length, { timeout: 30_000 }).toBe(g.edges.length);
   await page.keyboard.press("Escape");
   return composer;
 }
@@ -355,4 +355,151 @@ test("Tidy up re-lays out a hand-arranged diagram as one undo step", async ({ pa
   await page.mouse.click(empty.x, empty.y + 260);
   await page.keyboard.press("Control+z");
   await expect.poll(async () => live(await scene(page), "db")!.x).toBeCloseTo(live(messy, "db")!.x, 0);
+});
+
+
+test("continuous dictation: text arriving while requests are in flight is sent once, in order, and nothing is lost", async ({ page }) => {
+  const composer = await generate(page);
+  const sent: string[] = [];
+  // a slow planner, so later chunks arrive while earlier ones are still being planned
+  await page.route("**/api/plan-edit", async route => {
+    const { instruction } = route.request().postDataJSON() as { instruction: string };
+    sent.push(instruction);
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    await route.fulfill({ json: { status: "proposal", operations: [
+      { type: "addNode", ref: "new-1", label: `Step ${sent.length}`, near: "db" }, { type: "addEdge", from: "db", to: "new-1" },
+    ] } });
+  });
+  await page.getByRole("switch", { name: "Auto draw after a pause" }).click();
+
+  const chunk1 = "Add MongoDB for the data because it is very unstructured.";
+  const chunk2 = "Actually no, use Postgres instead of MongoDB.";
+  const chunk3 = "Connect everything properly. Connect everything properly.";
+  // Flow appends to whatever is in the box; mimic that with the current value plus new words
+  const append = async (words: string) => composer.fill(`${(await composer.inputValue()).trimEnd()} ${words}`.trimStart());
+
+  await composer.fill(chunk1);
+  await expect.poll(() => sent.length, { timeout: 15_000 }).toBe(1);
+  await append(chunk2); // arrives during request 1
+  await expect.poll(() => sent.length, { timeout: 20_000 }).toBe(2);
+  await append(chunk3); // arrives during request 2
+  await expect.poll(() => sent.length, { timeout: 20_000 }).toBe(3);
+  await expect.poll(async () => (await scene(page)).filter(el => el.type === "text" && /^Step \d$/.test(el.text) && !el.isDeleted).length, { timeout: 20_000 }).toBe(3);
+
+  // each chunk went out exactly once, on its own, in spoken order
+  expect(sent).toEqual([chunk1, chunk2, chunk3]);
+  await expect(composer).toHaveValue("");
+  for (const chunk of [chunk1, chunk2, chunk3]) await expect(page.getByText(chunk, { exact: true })).toHaveCount(1);
+  await page.waitForTimeout(3000); // a further pause must not re-send anything
+  expect(sent).toHaveLength(3);
+});
+
+
+test.describe("live mic", () => {
+  // a fake microphone; the Deepgram socket is intercepted and fed transcript events
+  test.use({ permissions: ["microphone"] });
+
+  test("keep talking: each pause draws, and speech during a slow request is queued, not lost", async ({ page }) => {
+    const { elements } = layoutGraph(graph);
+    await page.route("**/api/voice", route => route.fulfill({ json: { live: true } }));
+    await page.route("**/api/deepgram-token", route => route.fulfill({ json: { key: "test-key" } }));
+    await page.route("**/api/generate-diagram", route => route.fulfill({ json: { elements, graph, files: [] } }));
+    const planned: string[] = [];
+    await page.route("**/api/plan-edit", async route => {
+      const { instruction } = route.request().postDataJSON() as { instruction: string };
+      planned.push(instruction);
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      await route.fulfill({ json: { status: "proposal", operations: [
+        { type: "addNode", ref: "new-1", label: `Spoken ${planned.length}`, near: "db" }, { type: "addEdge", from: "db", to: "new-1" },
+      ] } });
+    });
+    let deepgram: { send: (m: string) => void } | undefined;
+    await page.routeWebSocket(/api\.deepgram\.com/, ws => { deepgram = ws; ws.onMessage(() => {}); });
+    const say = (text: string) => {
+      deepgram!.send(JSON.stringify({ is_final: true, channel: { alternatives: [{ transcript: text }] } }));
+      deepgram!.send(JSON.stringify({ type: "UtteranceEnd" }));
+    };
+
+    await page.goto("/d/new");
+    await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+    await page.getByRole("button", { name: "Start recording" }).click();
+    await expect.poll(() => Boolean(deepgram), { timeout: 15_000 }).toBe(true);
+    await expect(page.getByText("Keep talking", { exact: false })).toBeVisible();
+
+    say("A web frontend calls an API which reads a database");
+    await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow").length, { timeout: 30_000 }).toBe(2);
+    say("Add a cache after the API");
+    await expect.poll(() => planned.length, { timeout: 15_000 }).toBe(1);
+    say("And add a search index too"); // spoken while request 1 is still planning
+    await expect.poll(() => planned.length, { timeout: 20_000 }).toBe(2);
+    await expect.poll(async () => (await scene(page)).filter(el => el.type === "text" && /^Spoken \d$/.test(el.text) && !el.isDeleted).length, { timeout: 20_000 }).toBe(2);
+    expect(planned).toEqual(["Add a cache after the API", "And add a search index too"]);
+    await expect(page.getByTestId("composer")).toHaveValue("");
+  });
+
+  test("a complete sentence is sent as soon as Deepgram reports the pause, with no second wait", async ({ page }) => {
+    const { elements } = layoutGraph(graph);
+    await page.route("**/api/voice", route => route.fulfill({ json: { live: true } }));
+    await page.route("**/api/deepgram-token", route => route.fulfill({ json: { key: "test-key" } }));
+    await page.route("**/api/generate-diagram", route => route.fulfill({ json: { elements, graph, files: [] } }));
+    let sentAt = 0;
+    await page.route("**/api/plan-edit", async route => {
+      sentAt = Date.now();
+      await route.fulfill({ json: { status: "no_change", reason: "ok" } });
+    });
+    let deepgram: { send: (m: string) => void } | undefined;
+    await page.routeWebSocket(/api\.deepgram\.com/, ws => { deepgram = ws; ws.onMessage(() => {}); });
+    await page.goto("/d/new");
+    await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+    await page.getByRole("button", { name: "Start recording" }).click();
+    await expect.poll(() => Boolean(deepgram), { timeout: 15_000 }).toBe(true);
+    deepgram!.send(JSON.stringify({ is_final: true, channel: { alternatives: [{ transcript: "A web frontend calls an API which reads a database" }] } }));
+    deepgram!.send(JSON.stringify({ type: "UtteranceEnd" }));
+    await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow").length, { timeout: 30_000 }).toBe(2);
+    deepgram!.send(JSON.stringify({ is_final: true, channel: { alternatives: [{ transcript: "Add a cache after the API." }] } }));
+    const pausedAt = Date.now();
+    deepgram!.send(JSON.stringify({ type: "UtteranceEnd" }));
+    await expect.poll(() => sentAt, { timeout: 10_000 }).toBeGreaterThan(0);
+    // the old behaviour waited a further 1.2 s (normal speed) after Deepgram's pause
+    expect(sentAt - pausedAt).toBeLessThan(900);
+  });
+});
+
+test("e-commerce correction and follow-ups preserve the intended topology and conversation context", async ({ page }) => {
+  const initial: GraphResponse = { nodes: [
+    { id: "astro", label: "Astro" }, { id: "cdn", label: "Cloudflare" }, { id: "graphql", label: "GraphQL" },
+    { id: "boot", label: "Spring Boot" }, { id: "db", label: "Postgres" },
+  ], edges: [{ from: "astro", to: "cdn" }, { from: "cdn", to: "graphql" }, { from: "graphql", to: "boot" }, { from: "boot", to: "db" }] };
+  // This test checks client/server context transport and deterministic application, not model accuracy.
+  const composer = await generate(page, initial, "Astro uses Cloudflare and GraphQL, which calls Spring Boot. Spring Boot writes to Postgres.");
+  const plans = [
+    [{ type: "updateNode", id: "db", label: "MongoDB" }],
+    ...["RabbitMQ", "Stripe", "Elasticsearch", "GCS"].map((label, i) => [
+      { type: "addNode", ref: `extra-${i}`, label, near: "boot" }, { type: "addEdge", from: "boot", to: `extra-${i}` },
+    ]),
+    [{ type: "addNode", ref: "aws", label: "AWS", near: "boot" }, { type: "addEdge", from: "aws", to: "boot", label: "hosts" },
+      { type: "addNode", ref: "vercel", label: "Vercel", near: "astro" }, { type: "addEdge", from: "vercel", to: "astro", label: "hosts" },
+      { type: "addNode", ref: "gitlab", label: "GitLab", near: "vercel" }, { type: "addEdge", from: "gitlab", to: "vercel", label: "deploys" }],
+  ];
+  const instructions = ["Actually use MongoDB instead of Postgres.", "The backend pushes orders to RabbitMQ.", "It uses Stripe for payments.", "Add Elasticsearch for backend search.", "And GCS for its storage.", "Host the backend on AWS, frontend on Vercel, and use GitLab to deploy it."];
+  let calls = 0;
+  await page.route("**/api/plan-edit", async route => {
+    const body = route.request().postDataJSON();
+    expect(body.context.recentInstructions.join(" ")).toContain("Spring Boot");
+    if (calls > 0) expect(body.context.recentInstructions).toContain(instructions[calls - 1]);
+    await route.fulfill({ json: { status: "proposal", operations: plans[calls++] } });
+  });
+  await page.getByRole("switch", { name: "Auto draw after a pause" }).click();
+  for (const instruction of instructions) {
+    await composer.fill(instruction);
+    await expect(composer).toHaveValue("", { timeout: 30_000 });
+    await expect(page.getByTestId("notice")).toContainText("Applied", { timeout: 30_000 });
+  }
+  const current = (await scene(page)).filter(el => !el.isDeleted);
+  const labels = new Map(current.filter(el => el.type === "text" && el.containerId).map(el => [el.containerId, el.text]));
+  const relationships = current.filter(el => el.type === "arrow").map(el => `${labels.get(el.startBinding?.elementId)} -> ${labels.get(el.endBinding?.elementId)}`);
+  for (const expected of ["Spring Boot -> MongoDB", "Spring Boot -> RabbitMQ", "Spring Boot -> Stripe", "Spring Boot -> Elasticsearch", "Spring Boot -> GCS", "AWS -> Spring Boot", "Vercel -> Astro", "GitLab -> Vercel"]) expect(relationships).toContain(expected);
+  expect(relationships).not.toContain("GCS -> Vercel");
+  expect([...labels.values()]).not.toContain("Postgres");
+  expect(calls).toBe(6);
 });

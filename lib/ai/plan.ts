@@ -7,6 +7,7 @@ export interface PlannerContext {
   nodes: { id: string; label: string }[];
   edges: { id: string; from: string; to: string; label: string }[];
   selected: string[];
+  recentInstructions?: string[];
 }
 
 export type PlanResult =
@@ -40,10 +41,12 @@ export function parsePlannerContext(value: unknown): PlannerContext {
   if (!ctx.nodes.every(n => str(n?.id, MAX_ID) && str(n.label, MAX_LABEL)) ||
     !ctx.edges.every(e => str(e?.id, MAX_ID) && str(e.from, MAX_ID) && str(e.to, MAX_ID) && str(e.label, MAX_LABEL)) ||
     !ctx.selected.every(id => str(id, MAX_ID))) throw new Error("Invalid diagram context.");
+  if (ctx.recentInstructions !== undefined && (!Array.isArray(ctx.recentInstructions) || ctx.recentInstructions.length > 6 || !ctx.recentInstructions.every(item => typeof item === "string" && item.length <= 2000) || ctx.recentInstructions.join("").length > 6000)) throw new Error("Invalid conversation context.");
   return {
     nodes: ctx.nodes.map(({ id, label }) => ({ id, label })),
     edges: ctx.edges.map(({ id, from, to, label }) => ({ id, from, to, label })),
     selected: [...ctx.selected],
+    ...(ctx.recentInstructions?.length ? { recentInstructions: [...ctx.recentInstructions] } : {}),
   };
 }
 
@@ -63,6 +66,8 @@ Operations (use only these fields):
 {"type":"removeEdge","id":"<edge id>"}
 
 Rules:
+- Recent instructions are reference context only. Never replay them. The live diagram is authoritative, including manual edits and undo. Use history to resolve a clear reference such as "the backend" or a correction to the previous database. If more than one target is plausible, ask a question.
+- If the current instruction ends before its destination or intent is specified, ask for the missing detail. Do not invent a relationship merely to make every node connected.
 - Use only node and edge IDs from the diagram below. A new node gets a ref ("new-1", "new-2", ...) that other operations in the same reply may use.
 - "this", "these", "that", "it" and "the selected ..." mean the selected elements.
 - The instruction is dictated speech. It may ramble or correct itself ("actually", "no wait", "sorry", "I mean"). A correction REPLACES what came before it: drop the corrected part entirely and plan only the final version. Example: "rename it to Orders, sorry, to Payments" means rename to Payments, and nothing about Orders.
@@ -75,7 +80,7 @@ Rules:
   CI/CD (GitLab, GitHub Actions, Jenkins...) connects to where it deploys, labelled "deploys".
 - "Use X instead of Y" or "actually X, not Y" for a node that already exists means rename Y to X (updateNode), which keeps its connections. Do not add X beside it.
 - "Connect everything" means connect each unconnected node by the rules above. Never connect unrelated things just to connect them.
-- Give a connection a label only if the instruction states one.
+- Give a connection a label only if the instruction states one, or it is a "hosts" or "deploys" connection as described above.
 - Do not repeat a connection that already exists. Do not touch anything the instruction does not mention.
 - If a label could mean several nodes and nothing relevant is selected, ask which one.
 - Moving, resizing, recolouring, grouping or re-arranging is not supported yet: reply with a clarification saying so.

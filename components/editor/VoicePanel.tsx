@@ -8,7 +8,7 @@ import {
   useEffect,
   useEffectEvent,
 } from "react";
-import { remainingAfterSend, scheduleAutoDraw } from "@/lib/scene/auto-draw";
+import { LIVE_MIC_SEND_MS, remainingAfterSend, scheduleAutoDraw } from "@/lib/scene/auto-draw";
 import { IconSend, IconX } from "@tabler/icons-react";
 import MicButton from "./MicButton";
 import InterimIndicator from "./InterimIndicator";
@@ -19,8 +19,6 @@ import type { CommandNotice, CommandPhase } from "@/hooks/editor/useDiagramComma
 import type { ExcalidrawElement } from "@/types/diagram";
 import type { DiagramType } from "@/types/library";
 
-// Deepgram is a separate transcription service; Wispr Flow dictates straight into the composer.
-const DEEPGRAM_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEEPGRAM === "1";
 
 export interface VoicePanelHandle {
   focusInput: () => void;
@@ -32,7 +30,6 @@ interface VoicePanelProps {
   diagramId: string;
   diagramType: DiagramType;
   isLoading: boolean;
-  onSilence: (transcript: string) => void;
   /** Returns true when the instruction was accepted, so the composer can clear. */
   onSubmit: (text: string) => Promise<boolean> | boolean;
   autoDraw: boolean;
@@ -68,9 +65,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
   function VoicePanel(
     {
       diagramId,
-      diagramType,
       isLoading,
-      onSilence,
       onSubmit,
       autoDraw,
       onAutoDrawChange,
@@ -101,6 +96,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
     const submittingRef = useRef(false);
     const attemptedDraftRef = useRef("");
     const [messages, setMessages] = useState<string[]>([]);
+    // the live mic is offered only when the server has Deepgram configured
+    const [micAvailable, setMicAvailable] = useState(false);
+    useEffect(() => {
+      let cancelled = false;
+      fetch("/api/voice").then(r => r.json()).then(d => { if (!cancelled) setMicAvailable(Boolean(d?.live)); }).catch(() => {});
+      return () => { cancelled = true; };
+    }, []);
     const [speed, setSpeed] = useState<SpeechSpeed>(() => {
       if (typeof window === "undefined") return "normal";
       return (
@@ -125,9 +127,13 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       },
     }));
 
+    // Each spoken utterance joins the same queue as dictated text, so speech during a request is never lost.
+    const micSendRef = useRef(false);
     const handleSilence = (transcript: string) => {
-      setMessages((prev) => [...prev, transcript]);
-      onSilence(transcript);
+      const words = transcript.trim();
+      if (!words) return;
+      micSendRef.current = true;
+      setDraft((current) => (current.trim() ? `${current.trimEnd()} ${words}` : words));
     };
 
     const {
@@ -140,7 +146,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
     } = useDeepgram(
       handleSilence,
       speed,
-      diagramType === "system-architecture",
+      true, // diagrams are technical: always boost terms like Postgres, GraphQL, RabbitMQ
       onError,
     );
 
@@ -150,6 +156,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
         onMicStop?.();
       } else {
         reset();
+        // talking live means drawing live: additions apply as you go, deletions still ask
+        onAutoDrawChange(true);
         onMicStart?.();
         start();
       }
@@ -178,8 +186,10 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       if (attemptedDraftRef.current !== draft.trim()) void send(draft);
     });
     useEffect(() => {
-      if (!autoDraw || !draft.trim() || busy || isListening || composing || phase !== "idle") return;
-      return scheduleAutoDraw(submitAfterPause);
+      const live = isListening || micSendRef.current;
+      if (!(autoDraw || live) || !draft.trim() || busy || composing || phase !== "idle") return;
+      // the mic already waited for a pause; typed or Flow text gets the normal pause
+      return scheduleAutoDraw(() => { micSendRef.current = false; submitAfterPause(); }, live ? LIVE_MIC_SEND_MS : undefined);
     }, [autoDraw, draft, busy, isListening, composing, phase]);
 
     return (
@@ -195,33 +205,27 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
           onPreviewChange={setHistoryPreview}
         />
 
-        {DEEPGRAM_ENABLED ? (
-          <div className="flex flex-col items-center gap-2 pt-5 pb-3">
-            <MicButton isListening={isListening} onClick={handleToggle} />
-            <div className="flex flex-col items-center gap-0.5">
-              <span className="text-subtle text-xs">
-                {isListening
-                  ? "Listening — pause to generate"
-                  : isLoading
-                    ? "Drawing..."
-                    : "Click to start"}
-              </span>
-              <p className="text-placeholder text-xs">
-                Deepgram transcription (separate from Wispr Flow)
-              </p>
+        {micAvailable ? (
+          <div className="px-5 pt-5 pb-2">
+            <div className="flex items-center gap-4">
+              <MicButton isListening={isListening} onClick={handleToggle} />
+              <div className="min-w-0">
+                <p className="font-display text-[20px] font-extrabold tracking-tight leading-tight text-foreground">
+                  {isListening ? "Listening…" : "Talk your diagram into shape."}
+                </p>
+                <p className="text-[13px] text-subtle mt-1 leading-snug">
+                  {isListening
+                    ? "Keep talking — it draws on every pause."
+                    : isLoading || phase === "planning"
+                      ? "Drawing…"
+                      : "Tap the mic and describe your system. Or dictate with Wispr Flow below."}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-1 text-xs mt-1">
+            <div className="seg mt-3" role="group" aria-label="Pause before drawing">
               {(["fast", "normal", "slow"] as SpeechSpeed[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSpeed(s)}
-                  className={`px-2 py-0.5 rounded transition-colors ${
-                    speed === s
-                      ? "bg-primary text-white"
-                      : "text-placeholder hover:text-muted"
-                  }`}
-                >
-                  {s}
+                <button key={s} onClick={() => setSpeed(s)} className={speed === s ? "is-active" : ""} aria-pressed={speed === s}>
+                  <span className="px-1.5 text-[11px] font-semibold capitalize">{s}</span>
                 </button>
               ))}
             </div>

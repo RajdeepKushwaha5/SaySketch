@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nodeGeometry, relayoutScene, untouchedSince } from "./relayout";
+import { layoutFingerprint, relayoutScene, untouchedSince } from "./relayout";
 import type { ExcalidrawElement } from "../../types/diagram";
 
 const node = (id: string, x: number, y: number): ExcalidrawElement[] => [
@@ -57,6 +57,17 @@ describe("tidy layout", () => {
     expect(JSON.stringify(scene)).toBe(snapshot);
   });
 
+  it.each([
+    ["a locked node", { id: "api", locked: true }],
+    ["a natively grouped node", { id: "db", groupIds: ["g1"] }],
+    ["a framed node", { id: "web", frameId: "f1" }],
+    ["a rotated node", { id: "cdn", angle: 0.3 }],
+    ["a locked arrow", { id: "e2", locked: true }],
+  ])("declines rather than move %s", (_name, change) => {
+    const scene = messy().map(el => (el.id === change.id ? { ...el, ...change } : el));
+    expect(relayoutScene(scene)).toBeNull();
+  });
+
   it("declines when groups exist or there is nothing to arrange", () => {
     expect(relayoutScene([...messy(), { id: "g", type: "rectangle", x: 0, y: 0, width: 10, height: 10, customData: { yapdraw: { type: "group" } } }])).toBeNull();
     expect(relayoutScene(node("solo", 0, 0))).toBeNull();
@@ -66,12 +77,15 @@ describe("tidy layout", () => {
 describe("arrangement tracking", () => {
   it("is untouched only while every AI-placed node stays put and nothing is hand-drawn", () => {
     const scene = [...node("a", 0, 0), ...node("b", 300, 0), ...edge("e", "a", "b")];
-    const layout = nodeGeometry(scene);
+    const layout = layoutFingerprint(scene);
     expect(untouchedSince(layout, scene)).toBe(true);
     expect(untouchedSince(null, scene)).toBe(false);
     const moved = scene.map(el => (el.id === "a" ? { ...el, x: 40 } : el));
     expect(untouchedSince(layout, moved)).toBe(false);
     expect(untouchedSince(layout, [...scene, { id: "pen", type: "freedraw", x: 1, y: 1, points: [[0, 0]] }])).toBe(false);
     expect(untouchedSince(layout, [...scene, ...node("manual", 600, 0)])).toBe(false);
+    // bending an arrow by hand counts as arranging, so auto-tidy will not overwrite the route
+    const bent = scene.map(el => (el.id === "e" ? { ...el, points: [[0, 0], [5, 40], [10, 10]] } : el));
+    expect(untouchedSince(layout, bent)).toBe(false);
   });
 });

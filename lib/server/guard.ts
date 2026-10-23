@@ -61,19 +61,25 @@ export async function checkSharedRateLimit(key: string, now = Date.now(), limit 
 }
 
 /** Returns an error response when the request must not reach a model provider, else the parsed JSON body. */
+export async function guardRequestRate(request: Request, namespace = "ai"): Promise<Response | null> {
+  const key = `${namespace}:${clientKey(request)}`;
+  const shared = await checkSharedRateLimit(key);
+  if (shared === undefined && (process.env.UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_TOKEN)) {
+    return Response.json({ error: "The service is temporarily unavailable. Please try again later." }, { status: 503 });
+  }
+  const retryAfter = shared === undefined ? checkRateLimit(key) : shared;
+  if (retryAfter !== null) {
+    return Response.json({ error: `Too many requests. Try again in ${retryAfter}s.` }, { status: 429, headers: { "Retry-After": String(retryAfter) } });
+  }
+  return null;
+}
+
 export async function guardAIRequest(request: Request): Promise<{ error: Response } | { body: unknown }> {
   if (process.env.AI_DISABLED === "1") {
     return { error: Response.json({ error: "AI editing is switched off right now. Manual editing and export still work." }, { status: 503 }) };
   }
-  const key = clientKey(request);
-  const shared = await checkSharedRateLimit(key);
-  if (shared === undefined && (process.env.UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_TOKEN)) {
-    return { error: Response.json({ error: "AI is temporarily unavailable. Your diagram is unchanged; please try again later." }, { status: 503 }) };
-  }
-  const retryAfter = shared === undefined ? checkRateLimit(key) : shared;
-  if (retryAfter !== null) {
-    return { error: Response.json({ error: `Too many requests. Try again in ${retryAfter}s.` }, { status: 429, headers: { "Retry-After": String(retryAfter) } }) };
-  }
+  const limited = await guardRequestRate(request);
+  if (limited) return { error: limited };
   const reader = request.body?.getReader();
   const decoder = new TextDecoder();
   let text = "";
