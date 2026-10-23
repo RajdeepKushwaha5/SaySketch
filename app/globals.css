@@ -1,0 +1,400 @@
+@import "tailwindcss";
+
+html,
+body {
+  overscroll-behavior: none;
+}
+
+:root {
+  /* Ink & paper. One bold accent (vermilion); lines are soft or absent. */
+  --background: #f4eee2;
+  --foreground: #1a1714;
+
+  /* Surfaces */
+  --surface: #ebe3d3;
+  --surface-hover: #e2d8c4;
+  --paper: #fffdf8;
+
+  /* Brand: ink for primary actions */
+  --primary: #1a1714;
+  --primary-hover: #000000;
+  --primary-foreground: #fffdf8;
+
+  /* Neutral */
+  --secondary: #3a342d;
+  --secondary-hover: #26221d;
+  --secondary-foreground: #fffdf8;
+
+  /* Accent: vermilion */
+  --accent: #ff5a2e;
+  --accent-hover: #f0461a;
+  --accent-foreground: #fffdf8;
+
+  /* Text */
+  --text: #1a1714;
+  --text-muted: #4a443c;
+  --text-subtle: #6f675c;
+  --text-placeholder: #9c9384;
+
+  /* Lines: borders are soft; dividers are invisible (panels separate by tone) */
+  --border: #dcd2c0;
+  --border-subtle: transparent;
+  --ring: #ff5a2e;
+
+  /* Semantic */
+  --success: #2f7d4f;
+  --success-light: #dcefdf;
+  --warning: #b8640b;
+  --warning-light: #fbecd0;
+  --error: #c8371d;
+  --error-light: #fde3dc;
+
+  /* Voice/Recording */
+  --recording: #ff5a2e;
+  --recording-pulse: #ffb39c;
+
+  /* Canvas */
+  --canvas-bg: #fffdf8;
+  --canvas-grid: #e9e1d2;
+}
+
+/* Dark Mode - only when explicitly set via class */
+.dark {
+  /* Core */
+  --background: #0d0d0d;
+  --foreground: #f9fafb;
+
+  /* Surfaces */
+  --surface: #1a1a1a;
+  --surface-hover: #262626;
+
+  /* Brand */
+  --primary: #7c78ff;
+  --primary-hover: #8b87ff;
+  --primary-foreground: #0d0d0d;
+
+  /* Neutral */
+  --secondary: #6b7280;
+  --secondary-hover: #9ca3af;
+  --secondary-foreground: #0d0d0d;
+
+  /* Accent */
+  --accent: #f87171;
+  --accent-hover: #fca5a5;
+  --accent-foreground: #0d0d0d;
+
+  /* Text */
+  --text: #f9fafb;
+  --text-muted: #9ca3af;
+  --text-subtle: #6b7280;
+  --text-placeholder: #64748b;
+
+  /* Borders */
+  --border: #2d2d2d;
+  --border-subtle: #3d3d3d;
+  --ring: #7c78ff;
+
+  /* Semantic */
+  --success: #4ade80;
+  --success-light: #166534;
+  --warning: #fbbf24;
+  --warning-light: #854d0e;
+  --error: #f87171;
+  --error-light: #991b1b;
+
+  /* Voice/Recording */
+  --recording: #f87171;
+  --recording-pulse: #ef4444;
+
+  /* Canvas */
+  --canvas-bg: #121212;
+  --canvas-grid: #2d2d2d;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-hover: var(--secondary-hover);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-placeholder: var(--text-placeholder);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-error-light: var(--error-light);
+  --color-warning-light: var(--warning-light);
+  --color-success-light: var(--success-light);
+  --color-recording: var(--recording);
+  --color-recording-pulse: var(--recording-pulse);
+  --color-canvas-bg: var(--canvas-bg);
+  --color-paper: var(--paper);
+  /* hard-coded bg-white becomes warm sheet-white across the app (Excalidraw keeps its own) */
+  --color-white: #fffdf8;
+}
+
+@theme {
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
+  --font-display: var(--font-bricolage);
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    var(--font-inter),
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+/* Focus rings (in the base layer so components can restyle their own focus) */
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Selection: highlighter yellow */
+::selection {
+  background: #ffd84a;
+  color: #1a1714;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-subtle);
+}
+
+/* ─── Buttons: bold ink with a hard vermilion shadow; lift on hover, press on click ─── */
+@layer components {
+  .btn-ink,
+  .btn-paper {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 2px solid var(--foreground);
+    border-radius: 12px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    transition: transform 0.14s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.14s ease, background-color 0.2s ease;
+  }
+  .btn-ink {
+    background: var(--foreground);
+    color: var(--paper);
+    box-shadow: 3px 3px 0 var(--accent);
+  }
+  .btn-paper {
+    background: var(--paper);
+    color: var(--foreground);
+    box-shadow: 3px 3px 0 var(--foreground);
+  }
+  /* light sweep across the button on hover */
+  .btn-ink::after,
+  .btn-paper::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.28) 50%, transparent 65%);
+    transform: translateX(-120%);
+    transition: transform 0.55s ease;
+  }
+  .btn-paper::after {
+    background: linear-gradient(105deg, transparent 35%, rgba(255, 90, 46, 0.18) 50%, transparent 65%);
+  }
+  .btn-ink:hover:not(:disabled),
+  .btn-paper:hover:not(:disabled) {
+    transform: translate(-2px, -2px);
+  }
+  .btn-ink:hover:not(:disabled) { box-shadow: 5px 5px 0 var(--accent); }
+  .btn-paper:hover:not(:disabled) { box-shadow: 5px 5px 0 var(--foreground); }
+  .btn-ink:hover:not(:disabled)::after,
+  .btn-paper:hover:not(:disabled)::after {
+    transform: translateX(120%);
+  }
+  .btn-ink:active:not(:disabled),
+  .btn-paper:active:not(:disabled) {
+    transform: translate(3px, 3px);
+    box-shadow: 0 0 0 transparent;
+  }
+  .btn-ink:disabled,
+  .btn-paper:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* a sheet of paper resting on the desk: separation by shadow, not lines */
+  .sheet {
+    background: var(--paper);
+    border-radius: 18px;
+    box-shadow: 0 1px 0 rgba(26, 23, 20, 0.05), 0 18px 40px -22px rgba(74, 52, 20, 0.35);
+  }
+}
+
+/* ─── Shared UI pieces: menus, controls, toggles, modals — one visual language ─── */
+@keyframes pop-open {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@layer components {
+  /* popover / dropdown / context menu: paper, ink outline, hard ink shadow */
+  .pop {
+    background: var(--paper);
+    border: 2px solid var(--foreground);
+    border-radius: 14px;
+    box-shadow: 4px 4px 0 var(--foreground);
+    padding: 6px;
+    overflow: visible; /* nested submenus must not be clipped */
+    transform-origin: top right;
+    animation: pop-open 0.14s ease-out;
+  }
+  .pop-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    padding: 0.5rem 0.65rem;
+    border-radius: 9px;
+    font-size: 0.875rem;
+    text-align: left;
+    color: var(--text-muted);
+    transition: background-color 0.12s ease, color 0.12s ease;
+  }
+  .pop-item:hover { background: var(--surface); color: var(--foreground); }
+  .pop-item.is-active { background: #ffd84a; color: var(--foreground); font-weight: 600; }
+  .pop-item-danger { color: var(--error); }
+  .pop-item-danger:hover { background: var(--error-light); color: var(--error); }
+  .pop-label {
+    padding: 0.35rem 0.65rem 0.4rem;
+    font-family: var(--font-jetbrains), monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-subtle);
+  }
+  .pop-sep { height: 2px; margin: 5px 4px; border-radius: 2px; background: var(--surface); }
+
+  /* paper control chip (sort, import, settings) */
+  .ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--paper);
+    color: var(--text-muted);
+    border-radius: 12px;
+    box-shadow: 0 1px 0 rgba(26, 23, 20, 0.06);
+    transition: box-shadow 0.12s ease, color 0.12s ease, transform 0.12s ease;
+  }
+  .ctl:hover, .ctl[aria-expanded="true"] { color: var(--foreground); box-shadow: 0 0 0 2px var(--foreground); }
+
+  /* segmented toggle: the active segment is solid ink */
+  .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--paper); border-radius: 12px; box-shadow: 0 1px 0 rgba(26, 23, 20, 0.06); }
+  .seg > button { padding: 0.35rem; border-radius: 9px; color: var(--text-subtle); transition: background-color 0.12s ease, color 0.12s ease; }
+  .seg > button:hover { color: var(--foreground); background: var(--surface); }
+  .seg > button.is-active { background: var(--foreground); color: var(--paper); }
+
+  /* modal card and its backdrop */
+  .modal {
+    background: var(--paper);
+    border: 2px solid var(--foreground);
+    border-radius: 18px;
+    box-shadow: 6px 6px 0 var(--foreground);
+    animation: pop-open 0.16s ease-out;
+  }
+  .modal-backdrop { background: rgba(26, 23, 20, 0.28); backdrop-filter: blur(3px); }
+
+  /* section label and count badge */
+  .section-label {
+    font-family: var(--font-jetbrains), monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-subtle);
+  }
+  .count-badge {
+    min-width: 1.25rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--paper);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.25rem;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop, .modal { animation: none; }
+}
+
+/* hand-drawn underline that draws itself in */
+@keyframes draw-in {
+  from { stroke-dashoffset: var(--len, 400); }
+  to { stroke-dashoffset: 0; }
+}
+.scribble path {
+  stroke-dasharray: var(--len, 400);
+  stroke-dashoffset: var(--len, 400);
+  animation: draw-in 0.9s 0.35s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+/* node pop-in for the home page demo */
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.7) rotate(-3deg); }
+  70% { opacity: 1; transform: scale(1.06) rotate(1deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scribble path { animation: none; stroke-dashoffset: 0; }
+  .btn-ink, .btn-paper, .btn-ink::after, .btn-paper::after { transition: none; }
+}
+
+/* Excalidraw: hide the grey hint line under the toolbar */
+.excalidraw .HintViewer {
+  display: none !important;
+}

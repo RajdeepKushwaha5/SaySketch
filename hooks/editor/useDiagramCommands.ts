@@ -1,0 +1,174 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { nanoid } from "nanoid";
+import { db } from "@/lib/db";
+import { encodeAIMeta } from "@/lib/versionMeta";
+import { buildPlannerContext, type PlanResult } from "@/lib/ai/plan";
+import { buildPatch, sceneSnapshot, type PatchCandidate } from "@/lib/scene/patch";
+import type { ExcalidrawCanvasHandle } from "@/components/editor/ExcalidrawCanvas";
+import type { Diagram } from "@/types/library";
+import type { UserSettings } from "@/hooks/useUserSettings";
+
+export type CommandPhase = "idle" | "planning" | "preview" | "applying";
+
+export interface CommandNotice {
+  kind: "error" | "question" | "info" | "conflict";
+  text: string;
+  /** Instruction to re-plan against the current diagram (conflicts and failed plans). */
+  retry?: string;
+}
+
+export interface Proposal {
+  instruction: string;
+  candidate: PatchCandidate;
+  baseSnapshot: string;
+}
+
+interface Options {
+  id: string;
+  diagram: Diagram | null | undefined;
+  canvasRef: React.RefObject<ExcalidrawCanvasHandle | null>;
+  settings: UserSettings;
+}
+
+const CHANGED_WHILE_PLANNING = "The diagram changed while this was being planned. Nothing was applied.";
+
+/** Instruction lifecycle: plan against a content snapshot, preview, then apply only if the diagram is unchanged. */
+export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options) {
+  const [phase, setPhase] = useState<CommandPhase>("idle");
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [notice, setNotice] = useState<CommandNotice | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const applyingRef = useRef(false);
+
+  useEffect(() => () => abortRef.current?.abort(), [id]);
+
+  /** Returns true when the instruction was accepted for planning (the composer may clear it). */
+  async function propose(instruction: string): Promise<boolean> {
+    const canvas = canvasRef.current;
+    if (!canvas || !diagram) return false;
+    if (diagram.locked) {
+      setNotice({ kind: "error", text: "This diagram is locked. Unlock it to make changes." });
+      return false;
+    }
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    if (proposal) canvas.select([]);
+    setProposal(null);
+    setNotice(null);
+    setPhase("planning");
+
+    const base = canvas.getElements();
+    const baseSnapshot = sceneSnapshot(base);
+    try {
+      const res = await fetch("/api/plan-edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instruction,
+          context: buildPlannerContext(base, canvas.getSelectedIds()),
+          providerConfig: settings.apiKey ? { provider: settings.provider, apiKey: settings.apiKey } : undefined,
+        }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
+      });
+      const data = (await res.json().catch(() => ({}))) as PlanResult & { error?: string };
+      if (!res.ok || data.error) {
+        setNotice({ kind: "error", text: data.error ?? "Planning failed. Your diagram is unchanged.", retry: instruction });
+        return false;
+      }
+      if (data.status === "clarification") {
+        setNotice({ kind: "question", text: data.question });
+        return false;
+      }
+      if (data.status === "no_change") {
+        setNotice({ kind: "info", text: data.reason });
+        return true;
+      }
+      // Never preview a plan for a diagram that no longer exists in that form.
+      const current = canvasRef.current?.getElements() ?? [];
+      if (sceneSnapshot(current) !== baseSnapshot) {
+        setNotice({ kind: "conflict", text: CHANGED_WHILE_PLANNING, retry: instruction });
+        return false;
+      }
+      let candidate: PatchCandidate;
+      try {
+        candidate = buildPatch(current, data.operations);
+      } catch (err) {
+        setNotice({ kind: "error", text: err instanceof Error ? err.message : "That change could not be applied.", retry: instruction });
+        return false;
+      }
+      setProposal({ instruction, candidate, baseSnapshot });
+      setPhase("preview");
+      // Highlight what will change: existing shapes/arrows only (new ones appear on apply).
+      const existing = new Map(current.map(el => [el.id, el]));
+      canvasRef.current?.select(candidate.affectedIds.map(aid => existing.get(aid)).filter(el => el && !el.containerId).map(el => el!.id));
+      return true;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return false;
+      const timedOut = err instanceof Error && err.name === "TimeoutError";
+      setNotice({ kind: "error", text: timedOut ? "Planning took too long. Your diagram is unchanged." : "Could not reach the planner. Your diagram is unchanged.", retry: instruction });
+      return false;
+    } finally {
+      setPhase(p => (p === "planning" ? "idle" : p));
+    }
+  }
+
+  async function apply() {
+    const canvas = canvasRef.current;
+    if (!canvas || !proposal || applyingRef.current) return;
+    applyingRef.current = true;
+    setPhase("applying");
+    try {
+      const current = canvas.getElements();
+      if (sceneSnapshot(current) !== proposal.baseSnapshot) {
+        setNotice({ kind: "conflict", text: "You edited the diagram after this was proposed. Nothing was applied.", retry: proposal.instruction });
+        canvas.select([]);
+        setProposal(null);
+        return;
+      }
+      const latest = await db.diagrams.get(id);
+      try {
+        // Complete pre-change checkpoint (elements + files) so the change can be restored after reload.
+        await db.versions.add({
+          id: nanoid(),
+          diagramId: id,
+          version: latest?.version ?? 0,
+          elements: current,
+          files: canvas.getFiles(),
+          transcript: latest?.transcript ?? "",
+          savedAt: Date.now(),
+          label: encodeAIMeta({ prompt: proposal.instruction, summary: proposal.candidate.summary.join(" "), source: "ai" }),
+        });
+      } catch (err) {
+        console.error("checkpoint failed", err);
+        setNotice({ kind: "error", text: "Could not save a checkpoint, so nothing was applied. Export a backup and try again." });
+        return;
+      }
+      canvas.applyPatch(proposal.candidate.elements, proposal.candidate.affectedIds);
+      canvas.select([]);
+      setProposal(null);
+      setNotice({ kind: "info", text: "Applied. Ctrl/Cmd+Z undoes the whole change." });
+      // The canvas change autosaves through onChange; the instruction log is secondary.
+      if (latest) {
+        await db.diagrams.update(id, {
+          transcript: `${latest.transcript}\n${proposal.instruction}`.trim(),
+          metadata: { ...latest.metadata, generatedVia: "voice" },
+        }).catch(err => console.error("transcript update failed", err));
+      }
+    } finally {
+      applyingRef.current = false;
+      setPhase("idle");
+    }
+  }
+
+  function cancel() {
+    abortRef.current?.abort();
+    if (proposal) canvasRef.current?.select([]);
+    setProposal(null);
+    setPhase("idle");
+  }
+
+  return { phase, proposal, notice, propose, apply, cancel, dismissNotice: () => setNotice(null) };
+}
