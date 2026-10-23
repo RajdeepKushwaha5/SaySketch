@@ -30,22 +30,26 @@ const connects = (p: Plan, ref: (op: Record<string, unknown>) => boolean) => {
   return refs.length > 0 && refs.every(r => has(p, "addEdge", op => op.from === r || op.to === r));
 };
 
-const cases: { say: string; selected?: string[]; isolatedRedis?: boolean; expect: (p: Plan) => boolean }[] = [
+const cases: { say: string; selected?: string[]; isolatedRedis?: boolean; misheardBackend?: boolean; expect: (p: Plan) => boolean }[] = [
+  // speech-recognition mishearings from a real live-mic session: reuse the existing node, spell tech names right
+  { say: "So SpringBoard pushes orders into RabbitMQ for async", misheardBackend: true, expect: p => connects(p, label("rabbit")) && has(p, "addEdge", op => op.from === "backend") && !has(p, "addNode", label("spring")) && !has(p, "updateNode", op => !/^spring boot$/i.test(String(op.label))) },
+  { say: "and the spin move back end writes to Elasticsearch", misheardBackend: true, expect: p => has(p, "addEdge", op => op.from === "backend") && !has(p, "addNode", op => /spin|spring|back ?end/i.test(String(op.label))) && !has(p, "updateNode", op => !/^spring boot$/i.test(String(op.label))) },
+  { say: "you, by the way, can host the front end on Versa", expect: p => has(p, "addNode", label("vercel")) && !has(p, "addNode", label("versa ")) },
   // from a real dictated session: completeness, connections, hosting, CI/CD, replacement
   { say: "and we need Elasticsearch for search, and let's just host the entire backend on AWS", expect: p => connects(p, label("elastic")) && connects(p, label("aws")) },
   { say: "actually no, we better use MongoDB instead of the database because the data is very unstructured", expect: p => has(p, "updateNode", op => op.id === "db" && label("mongo")(op)) && !has(p, "addNode", label("mongo")) },
   { say: "yo, by the way, can you host the frontend on Vercel and also use GitLab for CI/CD", expect: p => connects(p, label("vercel")) && connects(p, label("gitlab")) },
   { say: "connect everything properly", isolatedRedis: true, expect: p => has(p, "addEdge", op => op.from === "redis" || op.to === "redis") },
-  { say: "add a redis cache next to the API and connect the API to it", expect: p => has(p, "addNode", label("redis")) && has(p, "addEdge", op => op.from === "api") },
+  { say: "add a redis cache next to the API and connect the API to it", expect: p => has(p, "addNode", label("redis")) && has(p, "addEdge", op => op.from === "api" && op.label === undefined) },
   { say: "rename the database to Postgres", expect: p => has(p, "updateNode", op => op.id === "db" && label("postgres")(op)) },
   { say: "call this one, um, Primary DB", selected: ["db"], expect: p => has(p, "updateNode", op => op.id === "db" && label("primary")(op)) },
   { say: "remove the connection between the web app and the API", expect: p => has(p, "removeEdge", op => op.id === "e1") && (p.operations?.length ?? 0) === 1 },
   { say: "put a queue after the API, no wait, after the database", expect: p => has(p, "addNode", op => label("queue")(op) && (op.near === "db" || op.near === undefined)) && !has(p, "addNode", op => op.near === "api") && !has(p, "removeEdge") },
   { say: "delete the database", expect: p => has(p, "removeNode", op => op.id === "db") },
   { say: "add a load balancer in front of the web app", expect: p => has(p, "addNode", label("load")) && has(p, "addEdge", op => op.to === "web") },
-  { say: "connect this to the database", selected: ["web"], expect: p => has(p, "addEdge", op => op.from === "web" && op.to === "db") },
+  { say: "connect this to the database", selected: ["web"], expect: p => has(p, "addEdge", op => op.from === "web" && op.to === "db" && op.label === undefined) },
   // held out from prompt tuning (added after the first live run)
-  { say: "add an auth service, sorry, I mean a billing service, next to the API", expect: p => has(p, "addNode", label("billing")) && !has(p, "addNode", label("auth")) && !has(p, "removeEdge") },
+  { say: "add an auth service, sorry, I mean a billing service, next to the API", expect: p => connects(p, label("billing")) && !has(p, "addNode", label("auth")) && !has(p, "removeEdge") },
   { say: "insert a cache between the API and the database", expect: p => has(p, "addNode", label("cache")) && has(p, "addEdge", op => op.from === "api") && has(p, "addEdge", op => op.to === "db") },
   { say: "move the API over to the left a bit", expect: p => p.status === "clarification" },
   { say: "make sure the API talks to the database", expect: p => p.status === "no_change" },
@@ -63,13 +67,16 @@ describe.skipIf(!live)("live planner evaluation", () => {
         method: "POST",
         body: JSON.stringify({ instruction: c.say, context: c.isolatedRedis
           ? { ...context, nodes: [...context.nodes, { id: "redis", label: "Redis" }], selected: [] }
-          : { ...context, selected: c.selected ?? [] } }),
+          : c.misheardBackend
+            ? { ...context, nodes: [...context.nodes, { id: "backend", label: "string root" }], edges: [...context.edges, { id: "e9", from: "api", to: "backend", label: "" }], selected: [] }
+            : { ...context, selected: c.selected ?? [] } }),
         headers: { "x-forwarded-for": `eval-${rows.length}` },
       }));
       const plan = (await res.json()) as Plan & { error?: string };
       let applies = "n/a";
       if (plan.status === "proposal") {
-        try { buildPatch(c.isolatedRedis ? [...scene, ...node("redis", 900, "Redis")] : scene, plan.operations); applies = "yes"; } catch (err) { applies = `no: ${(err as Error).message}`; }
+        const extra = c.isolatedRedis ? node("redis", 900, "Redis") : c.misheardBackend ? [...node("backend", 900, "string root"), arrow("e9", "api", "backend")] : [];
+        try { buildPatch([...scene, ...extra], plan.operations); applies = "yes"; } catch (err) { applies = `no: ${(err as Error).message}`; }
       }
       const ok = res.ok && c.expect(plan) && (applies === "yes" || applies === "n/a");
       if (ok) correct++;

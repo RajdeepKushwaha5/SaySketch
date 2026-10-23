@@ -7,30 +7,23 @@ const SPEED_PRESETS = { fast: 800, normal: 1200, slow: 1800 } as const;
 export type SpeechSpeed = keyof typeof SPEED_PRESETS;
 export { SPEED_PRESETS };
 
-// Deepgram keyword boost for OOV tech terms
-const SYSARCH_KEYWORDS = [
-  "async",
-  "nginx",
-  "postgresql",
-  "elasticsearch",
-  "rabbitmq",
-  "graphql",
-  "datadog",
-  "supabase",
-  "netlify",
-  "cloudflare",
-  "astro",
-  "bigquery",
-  "llm",
-  "vue",
+// Nova-3 keyterm prompting: correctly cased stack names, so speech like "Spring Boot", "RabbitMQ"
+// or "Vercel" is not heard as "string root", "GraviTE MKV" or "Versa". Kept far under the 500-token cap.
+// Diagram labels are deliberately not added: a misheard label would then be reinforced.
+export const TECH_KEYTERMS = [
+  "Spring Boot", "RabbitMQ", "Kafka", "Redis", "Elasticsearch", "PostgreSQL", "MySQL", "MongoDB", "DynamoDB",
+  "Supabase", "Firebase", "Prisma", "GraphQL", "gRPC", "REST API", "Node.js", "Next.js", "Astro", "React", "Vue",
+  "FastAPI", "Django", "Vercel", "Netlify", "Cloudflare", "AWS", "GCP", "GCS", "Azure", "S3", "Lambda", "Kubernetes",
+  "Docker", "Nginx", "GitLab", "GitHub Actions", "Jenkins", "CI/CD", "Stripe", "Auth0", "Clerk", "Datadog", "Sentry",
+  "Grafana", "Prometheus", "CDN", "LLM", "OpenAI", "LangChain", "BigQuery", "Snowflake",
 ];
 
 const SYSARCH_REGEX_REPLACEMENTS: [RegExp, string][] = [
   [/\b(lang|line|lam|lambda|land|lon)\s*(chain|Shane|chains)\b/gi, "LangChain"],
   [/\b(lang|line|lam|lambda|land|lon)\s*graph\b/gi, "LangGraph"],
   [/\bfast\s*(api|app\s*I|happy|app)\b/gi, "FastAPI"],
-  [/\bspring\s*boot\b/gi, "SpringBoot"],
-  [/\bnext\s*\.?\s*js\b/gi, "NextJS"],
+  [/\bspring\s*boot\b/gi, "Spring Boot"],
+  [/\bnext\s*\.?\s*js\b/gi, "Next.js"],
   [/\bgraph\s*ql\b/gi, "GraphQL"],
   [/\bg\s*rpc\b/gi, "gRPC"],
   [/\bmongo\s*db\b/gi, "MongoDB"],
@@ -123,14 +116,15 @@ export function useDeepgram(
       setIsListening(true); // UI: mic live before WS open
 
       const params = new URLSearchParams({
-        model: "nova-2",
+        model: "nova-3",
         interim_results: "true",
         smart_format: "true",
         utterance_end_ms: "1000",
         endpointing: "300",
       });
       if (boostTechTerms) {
-        SYSARCH_KEYWORDS.forEach((kw) => params.append("keywords", `${kw}:5`));
+        // one keyterm per parameter; multi-word terms are URL-encoded by URLSearchParams
+        TECH_KEYTERMS.forEach((term) => params.append("keyterm", term));
       }
 
       const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params}`, [

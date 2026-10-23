@@ -2,7 +2,7 @@
 export function isCompleteThought(text: string): boolean {
   const words = text.trim().replace(/[.,!?;:]+$/g, "").trim();
   if (!words) return false;
-  if (/\b(?:a|an|the|on|to|into|through|from|with|for|and|or|which|because|instead of|connects to|hosted on|writes to|pushes to|actually no|wait actually)\s*$/i.test(words)) return false;
+  if (/\b(?:a|an|the|on|to|into|through|from|with|for|and|or|which|because|instead of|connects to|hosted on|writes to|pushes to|actually no|wait actually|via|by|so|then|like|is|are|be|let's|let's say|host|use|connect|add|put|call|send|hit|hits|go|goes|um|uh|er|basically)\s*$/i.test(words)) return false;
   return words.split(/\s+/).length >= 3 || /^(?:add|remove|delete|disconnect)\s+\S+/i.test(words);
 }
 

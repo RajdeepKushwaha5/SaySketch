@@ -200,7 +200,8 @@ test("an edit made while a proposal is open blocks Apply and offers to plan agai
   await page.route("**/api/plan-edit", route => route.fulfill({ json: PROPOSAL }));
   await composer.fill("add a cache near the API");
   await composer.press("Enter");
-  await expect(page.getByTestId("proposal")).toBeVisible();
+  // under full-suite load the dev server can take a few seconds to answer the first plan
+  await expect(page.getByTestId("proposal")).toBeVisible({ timeout: 15_000 });
   // "db" sits clear of the style panel that the preview highlight opens
   const dbBefore = live(await scene(page), "db")!.y;
   await drag(page, "db", 0, 140);
