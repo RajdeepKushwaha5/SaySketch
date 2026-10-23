@@ -90,6 +90,7 @@ export default function EditorPage({ params }: Props) {
       const res = await fetch("/api/example");
       const example = await res.json();
       canvasRef.current?.updateDiagram(example.elements, { replace: true, files: example.files });
+      commands.markAiLayout(canvasRef.current?.getElements() ?? []);
       await db.diagrams.update(id, { graph: example.graph, updatedAt: Date.now() });
     } catch {
       showError("couldn't load the example — try again");
@@ -99,7 +100,12 @@ export default function EditorPage({ params }: Props) {
   // Full generation replaces the canvas, so it only runs on an empty one; everything else is a reviewed patch.
   async function submitInstruction(text: string): Promise<boolean> {
     const live = canvasRef.current?.getElements() ?? [];
-    if (live.length === 0) return handleSilence(text);
+    if (live.length === 0) {
+      const drawn = await handleSilence(text);
+      // a fresh generation is the AI's layout; later edits tidy it until the user arranges something
+      if (drawn) commands.markAiLayout(canvasRef.current?.getElements() ?? []);
+      return drawn;
+    }
     return commands.propose(text);
   }
 
@@ -170,6 +176,7 @@ export default function EditorPage({ params }: Props) {
         onDuplicate={handleDuplicate}
         onToggleLock={handleToggleLock}
         onSaveVersion={saveVersion}
+        onTidy={commands.tidy}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         menuRef={menuRef}
@@ -211,6 +218,7 @@ export default function EditorPage({ params }: Props) {
             examples={diagram.name === EXAMPLE_NAME ? EXAMPLE_TRY.map((prompt) => ({ label: prompt, prompt })) : undefined}
             phase={commands.phase}
             proposalSummary={commands.proposal?.candidate.summary ?? null}
+            proposalTidy={commands.proposal?.tidy ?? false}
             notice={commands.notice}
             onApply={commands.apply}
             onCancel={commands.cancel}

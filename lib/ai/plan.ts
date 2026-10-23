@@ -68,6 +68,13 @@ Rules:
 - The instruction is dictated speech. It may ramble or correct itself ("actually", "no wait", "sorry", "I mean"). A correction REPLACES what came before it: drop the corrected part entirely and plan only the final version. Example: "rename it to Orders, sorry, to Payments" means rename to Payments, and nothing about Orders.
 - Put a new node "near" the node it relates to. "After X" means a new connection from X to the new node; "in front of X" means from the new node to X. Connections point from the caller/sender to the callee/receiver.
 - Never remove or reroute existing connections unless the instruction explicitly asks (e.g. "between A and B", "instead of", "remove", "replace").
+- Include EVERY component the instruction names. Never silently drop one.
+- Every new node must be connected to at least one other node unless the user says it stands alone. When the connection is not stated, use the obvious one:
+  a service connects to the database, cache, queue, search index or storage it uses; a frontend goes through a CDN to the API, and the API to the backend;
+  a hosting or cloud platform (AWS, Vercel, GCP, Azure...) connects to what it hosts, labelled "hosts";
+  CI/CD (GitLab, GitHub Actions, Jenkins...) connects to where it deploys, labelled "deploys".
+- "Use X instead of Y" or "actually X, not Y" for a node that already exists means rename Y to X (updateNode), which keeps its connections. Do not add X beside it.
+- "Connect everything" means connect each unconnected node by the rules above. Never connect unrelated things just to connect them.
 - Give a connection a label only if the instruction states one.
 - Do not repeat a connection that already exists. Do not touch anything the instruction does not mention.
 - If a label could mean several nodes and nothing relevant is selected, ask which one.

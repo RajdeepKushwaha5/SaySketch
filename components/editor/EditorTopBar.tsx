@@ -1,6 +1,6 @@
 'use client'
 
-import { IconArrowLeft, IconStar, IconStarFilled, IconLock, IconBookmark, IconSettings, IconKeyboard } from '@tabler/icons-react'
+import { IconArrowLeft, IconStar, IconStarFilled, IconLock, IconBookmark, IconSettings, IconKeyboard, IconWand } from '@tabler/icons-react'
 import type { Diagram } from '@/types/library'
 import type { SaveStatus } from '@/hooks/editor/useAutoSave'
 import type { ExcalidrawCanvasHandle } from '@/components/editor/ExcalidrawCanvas'
@@ -17,6 +17,7 @@ interface Props {
   onDuplicate?: () => void
   onToggleLock?: () => void
   onSaveVersion?: () => void
+  onTidy?: () => void
   onOpenSettings?: () => void
   onOpenShortcuts?: () => void
   canvasRef?: React.RefObject<ExcalidrawCanvasHandle | null>
@@ -32,6 +33,7 @@ export default function EditorTopBar({
   onDuplicate,
   onToggleLock,
   onSaveVersion,
+  onTidy,
   onOpenSettings,
   onOpenShortcuts,
   canvasRef,
@@ -76,6 +78,18 @@ export default function EditorTopBar({
       <div className="flex-1" />
 
       <SaveStatusIndicator status={saveStatus} />
+
+      {onTidy && (
+        <button
+          onClick={onTidy}
+          className="ctl h-9 px-3 text-[13px] font-medium"
+          aria-label="Tidy up layout"
+          title="Re-lay out the whole diagram. Ctrl/Cmd+Z restores your layout."
+        >
+          <IconWand size={15} />
+          <span className="hidden md:inline">Tidy up</span>
+        </button>
+      )}
 
       {onSaveVersion && (
         <button

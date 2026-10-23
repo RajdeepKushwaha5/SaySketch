@@ -71,10 +71,12 @@ test("Auto draw creates after a pause, applies additions and preserves manual-re
   await expect(page.getByTestId("notice")).toContainText("Applied", { timeout: 30_000 });
   const after = await scene(page);
   expect(after.filter(el => !el.isDeleted && el.type === "rectangle")).toHaveLength(4);
+  // nothing was arranged by hand yet, so the addition is tidied in: same nodes and sizes, no overlaps
   for (const id of ["web", "api", "db"]) {
     const original = live(before, id)!;
-    expect(live(after, id)).toMatchObject({ x: original.x, y: original.y, width: original.width, height: original.height });
+    expect(live(after, id)).toMatchObject({ width: original.width, height: original.height, boundElements: expect.arrayContaining(original.boundElements) });
   }
+  expect(overlapping(after)).toBe(false);
   await page.unroute("**/api/plan-edit");
   await page.route("**/api/plan-edit", route => route.fulfill({ json: { status: "proposal", operations: [{ type: "removeNode", id: "db" }] } }));
   await composer.fill("Remove the database");
@@ -147,6 +149,9 @@ test("select, dictate, review and apply; one undo removes the change; Mermaid ex
     await route.fulfill({ json: PROPOSAL });
   });
 
+  // Arrange something by hand first: from then on SaySketch keeps the arrangement exactly.
+  await drag(page, "db", 0, 120);
+  await page.mouse.click(5, 5);
   // Point at the API node, then speak.
   const { x, y } = await centreOf(page, "api");
   await page.mouse.click(x, y);
@@ -301,4 +306,53 @@ test("Back to library saves a rapid manual edit before navigation", async ({ pag
   await page.goto(editorUrl);
   await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
   expect(live(await scene(page), "db")!.y).toBe(movedY);
+});
+
+
+const nodesOf = (els: ExcalidrawElement[]) => els.filter(el => !el.isDeleted && el.type === "rectangle" && el.customData?.yapdraw?.type === "node");
+const overlapping = (els: ExcalidrawElement[]) => {
+  const n = nodesOf(els);
+  for (let i = 0; i < n.length; i++) for (let j = i + 1; j < n.length; j++) {
+    const a = n[i]; const b = n[j];
+    if (a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height) return true;
+  }
+  return false;
+};
+
+test("before anything is arranged by hand, applied changes are tidied like a generated diagram", async ({ page }) => {
+  const composer = await generate(page);
+  await page.route("**/api/plan-edit", route => route.fulfill({ json: { status: "proposal", operations: [
+    { type: "addNode", ref: "new-1", label: "Cache", near: "api" }, { type: "addEdge", from: "api", to: "new-1" },
+    { type: "addNode", ref: "new-2", label: "Search", near: "api" }, { type: "addEdge", from: "api", to: "new-2" },
+    { type: "addNode", ref: "new-3", label: "Queue", near: "api" }, { type: "addEdge", from: "api", to: "new-3" },
+  ] } }));
+  await composer.fill("add a cache, search and a queue next to the API");
+  await composer.press("Enter");
+  await expect(page.getByTestId("proposal")).toContainText("layout is tidied");
+  await page.getByTestId("proposal").getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("notice")).toContainText("tidied");
+  const els = await scene(page);
+  expect(nodesOf(els)).toHaveLength(6);
+  expect(overlapping(els)).toBe(false);
+  // every arrow still connects its two nodes
+  expect(els.filter(el => el.type === "arrow" && !el.isDeleted).every(a => a.startBinding?.elementId && a.endBinding?.elementId)).toBe(true);
+});
+
+test("Tidy up re-lays out a hand-arranged diagram as one undo step", async ({ page }) => {
+  await generate(page);
+  // pile two nodes onto each other by hand
+  const api = live(await scene(page), "api")!;
+  const db = live(await scene(page), "db")!;
+  await drag(page, "db", api.x - db.x + 20, api.y - db.y + 10);
+  await page.mouse.click(5, 5);
+  const messy = await scene(page);
+  expect(overlapping(messy)).toBe(true);
+  await page.getByRole("button", { name: "Tidy up layout" }).click();
+  await expect(page.getByTestId("notice")).toContainText("Tidied");
+  expect(overlapping(await scene(page))).toBe(false);
+  // one undo restores the hand arrangement
+  const empty = await centreOf(page, "web");
+  await page.mouse.click(empty.x, empty.y + 260);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => live(await scene(page), "db")!.x).toBeCloseTo(live(messy, "db")!.x, 0);
 });

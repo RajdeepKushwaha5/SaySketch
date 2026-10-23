@@ -8,7 +8,7 @@ import {
   useEffect,
   useEffectEvent,
 } from "react";
-import { scheduleAutoDraw } from "@/lib/scene/auto-draw";
+import { remainingAfterSend, scheduleAutoDraw } from "@/lib/scene/auto-draw";
 import { IconSend, IconX } from "@tabler/icons-react";
 import MicButton from "./MicButton";
 import InterimIndicator from "./InterimIndicator";
@@ -47,6 +47,8 @@ interface VoicePanelProps {
   selectionLabels: string[];
   phase: CommandPhase;
   proposalSummary: string[] | null;
+  /** Apply will also tidy the layout (nothing has been arranged by hand yet). */
+  proposalTidy?: boolean;
   notice: CommandNotice | null;
   onApply: () => void;
   onCancel: () => void;
@@ -82,6 +84,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       selectionLabels,
       phase,
       proposalSummary,
+      proposalTidy,
       notice,
       onApply,
       onCancel,
@@ -163,7 +166,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       attemptedDraftRef.current = instruction;
       setMessages((prev) => [...prev, instruction]);
       try {
-        if (await onSubmit(instruction)) setDraft((current) => (current.trim() === instruction ? "" : current));
+        // keep anything dictated while this was in flight; it becomes the next instruction
+        if (await onSubmit(instruction)) setDraft((current) => remainingAfterSend(current, text));
       } finally {
         submittingRef.current = false;
       }
@@ -319,7 +323,11 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
             <ul className="text-sm space-y-0.5 mb-2 list-disc pl-4">
               {proposalSummary.map((line, i) => <li key={i}>{line}</li>)}
             </ul>
-            <p className="text-xs text-subtle mb-2.5">Highlighted shapes change; everything else stays where it is.</p>
+            <p className="text-xs text-subtle mb-2.5">
+              {proposalTidy
+                ? "Highlighted shapes change, and the layout is tidied (you haven't arranged anything yet)."
+                : "Highlighted shapes change; everything else stays where it is."}
+            </p>
             <div className="flex gap-2">
               <button
                 onClick={onApply}

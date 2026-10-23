@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AUTO_DRAW_PAUSE_MS, canAutoApply, scheduleAutoDraw } from "./auto-draw";
+import { AUTO_DRAW_PAUSE_MS, canAutoApply, remainingAfterSend, scheduleAutoDraw } from "./auto-draw";
 
 afterEach(() => vi.useRealTimers());
 describe("Auto draw", () => {
@@ -29,5 +29,12 @@ describe("Auto draw", () => {
     expect(canAutoApply([{ type: "addNode", ref: "n", label: "Cache" }, { type: "removeEdge", id: "edge" }])).toBe(false);
     expect(canAutoApply([{ type: "removeNode", id: "api" }])).toBe(false);
     expect(canAutoApply([])).toBe(false);
+  });
+  it("keeps only text dictated after the sent instruction", () => {
+    expect(remainingAfterSend("Add a cache", "Add a cache")).toBe("");
+    expect(remainingAfterSend("Add a cache. Then connect it to Postgres", "Add a cache.")).toBe("Then connect it to Postgres");
+    expect(remainingAfterSend("  Add a cache  more words", " Add a cache ")).toBe("more words");
+    // the user edited what was sent: never guess, keep everything
+    expect(remainingAfterSend("Add a Redis cache", "Add a cache")).toBe("Add a Redis cache");
   });
 });

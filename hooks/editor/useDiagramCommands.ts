@@ -6,6 +6,8 @@ import { db } from "@/lib/db";
 import { encodeAIMeta } from "@/lib/versionMeta";
 import { buildPlannerContext, type PlanResult } from "@/lib/ai/plan";
 import { buildPatch, sceneSnapshot, type PatchCandidate } from "@/lib/scene/patch";
+import { nodeGeometry, relayoutScene, untouchedSince } from "@/lib/scene/relayout";
+import type { ExcalidrawElement } from "@/types/diagram";
 import { canAutoApply } from "@/lib/scene/auto-draw";
 import type { ExcalidrawCanvasHandle } from "@/components/editor/ExcalidrawCanvas";
 import type { Diagram } from "@/types/library";
@@ -25,6 +27,8 @@ export interface Proposal {
   candidate: PatchCandidate;
   baseSnapshot: string;
   autoApplicable: boolean;
+  /** The user has not arranged anything since the AI last laid the diagram out, so Apply also tidies it. */
+  tidy: boolean;
 }
 
 interface Options {
@@ -42,6 +46,9 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [notice, setNotice] = useState<CommandNotice | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // node geometry as the AI last left it; any manual move or drawing switches to "keep my arrangement"
+  const aiLayoutRef = useRef<Map<string, string> | null>(null);
+  const markAiLayout = (scene: readonly ExcalidrawElement[]) => { aiLayoutRef.current = nodeGeometry(scene); };
   const applyingRef = useRef(false);
 
   useEffect(() => () => abortRef.current?.abort(), [id]);
@@ -102,7 +109,7 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         setNotice({ kind: "error", text: err instanceof Error ? err.message : "That change could not be applied.", retry: instruction });
         return false;
       }
-      setProposal({ instruction, candidate, baseSnapshot, autoApplicable: canAutoApply(data.operations) });
+      setProposal({ instruction, candidate, baseSnapshot, autoApplicable: canAutoApply(data.operations), tidy: untouchedSince(aiLayoutRef.current, current) });
       setPhase("preview");
       // Highlight what will change: existing shapes/arrows only (new ones appear on apply).
       const existing = new Map(current.map(el => [el.id, el]));
@@ -163,10 +170,18 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         setProposal(null);
         return;
       }
-      canvas.applyPatch(proposal.candidate.elements, proposal.candidate.affectedIds);
+      // one undo step either way: the change, plus a tidy layout while nothing was arranged by hand
+      let { elements, affectedIds } = proposal.candidate;
+      const tidied = proposal.tidy ? relayoutScene(elements) : null;
+      if (tidied) {
+        elements = tidied.elements;
+        affectedIds = [...new Set([...affectedIds, ...tidied.movedIds])];
+      }
+      canvas.applyPatch(elements, affectedIds);
+      if (proposal.tidy) markAiLayout(canvas.getElements());
       canvas.select([]);
       setProposal(null);
-      setNotice({ kind: "info", text: "Applied. Ctrl/Cmd+Z undoes the whole change." });
+      setNotice({ kind: "info", text: tidied ? "Applied and tidied the layout. Move anything and your arrangement is kept from then on." : "Applied. Ctrl/Cmd+Z undoes the whole change." });
       // The canvas change autosaves through onChange; the instruction log is secondary.
       if (latest) {
         await db.diagrams.update(id, {
@@ -193,5 +208,23 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
     setPhase("idle");
   }
 
-  return { phase, proposal, notice, propose, apply, cancel, dismissNotice: () => setNotice(null) };
+  /** Explicit re-layout of the whole diagram; a single native undo step restores the previous arrangement. */
+  function tidy() {
+    const canvas = canvasRef.current;
+    if (!canvas || phase !== "idle" || proposal) return;
+    if (diagram?.locked) {
+      setNotice({ kind: "error", text: "This diagram is locked. Unlock it to tidy the layout." });
+      return;
+    }
+    const result = relayoutScene(canvas.getElements());
+    if (!result) {
+      setNotice({ kind: "info", text: "Nothing to tidy here (diagrams with groups keep their layout)." });
+      return;
+    }
+    canvas.applyPatch(result.elements, result.movedIds);
+    markAiLayout(canvas.getElements());
+    setNotice({ kind: "info", text: "Tidied. Ctrl/Cmd+Z restores your previous layout." });
+  }
+
+  return { phase, proposal, notice, propose, apply, cancel, tidy, markAiLayout, dismissNotice: () => setNotice(null) };
 }

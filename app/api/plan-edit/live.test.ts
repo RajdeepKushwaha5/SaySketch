@@ -25,7 +25,17 @@ const has = (plan: Plan, type: string, test: (op: Record<string, unknown>) => bo
   plan.operations?.some(op => op.type === type && test(op as unknown as Record<string, unknown>)) ?? false;
 const label = (text: string) => (op: Record<string, unknown>) => String(op.label ?? "").toLowerCase().includes(text);
 
-const cases: { say: string; selected?: string[]; expect: (p: Plan) => boolean }[] = [
+const connects = (p: Plan, ref: (op: Record<string, unknown>) => boolean) => {
+  const refs = (p.operations ?? []).filter(op => op.type === "addNode" && ref(op as unknown as Record<string, unknown>)).map(op => (op as { ref: string }).ref);
+  return refs.length > 0 && refs.every(r => has(p, "addEdge", op => op.from === r || op.to === r));
+};
+
+const cases: { say: string; selected?: string[]; isolatedRedis?: boolean; expect: (p: Plan) => boolean }[] = [
+  // from a real dictated session: completeness, connections, hosting, CI/CD, replacement
+  { say: "and we need Elasticsearch for search, and let's just host the entire backend on AWS", expect: p => connects(p, label("elastic")) && connects(p, label("aws")) },
+  { say: "actually no, we better use MongoDB instead of the database because the data is very unstructured", expect: p => has(p, "updateNode", op => op.id === "db" && label("mongo")(op)) && !has(p, "addNode", label("mongo")) },
+  { say: "yo, by the way, can you host the frontend on Vercel and also use GitLab for CI/CD", expect: p => connects(p, label("vercel")) && connects(p, label("gitlab")) },
+  { say: "connect everything properly", isolatedRedis: true, expect: p => has(p, "addEdge", op => op.from === "redis" || op.to === "redis") },
   { say: "add a redis cache next to the API and connect the API to it", expect: p => has(p, "addNode", label("redis")) && has(p, "addEdge", op => op.from === "api") },
   { say: "rename the database to Postgres", expect: p => has(p, "updateNode", op => op.id === "db" && label("postgres")(op)) },
   { say: "call this one, um, Primary DB", selected: ["db"], expect: p => has(p, "updateNode", op => op.id === "db" && label("primary")(op)) },
@@ -51,13 +61,15 @@ describe.skipIf(!live)("live planner evaluation", () => {
       if (rows.length) await new Promise(resolve => setTimeout(resolve, Number(process.env.LIVE_EVAL_DELAY_MS ?? 15_000)));
       const res = await POST(new Request("http://x/api/plan-edit", {
         method: "POST",
-        body: JSON.stringify({ instruction: c.say, context: { ...context, selected: c.selected ?? [] } }),
+        body: JSON.stringify({ instruction: c.say, context: c.isolatedRedis
+          ? { ...context, nodes: [...context.nodes, { id: "redis", label: "Redis" }], selected: [] }
+          : { ...context, selected: c.selected ?? [] } }),
         headers: { "x-forwarded-for": `eval-${rows.length}` },
       }));
       const plan = (await res.json()) as Plan & { error?: string };
       let applies = "n/a";
       if (plan.status === "proposal") {
-        try { buildPatch(scene, plan.operations); applies = "yes"; } catch (err) { applies = `no: ${(err as Error).message}`; }
+        try { buildPatch(c.isolatedRedis ? [...scene, ...node("redis", 900, "Redis")] : scene, plan.operations); applies = "yes"; } catch (err) { applies = `no: ${(err as Error).message}`; }
       }
       const ok = res.ok && c.expect(plan) && (applies === "yes" || applies === "n/a");
       if (ok) correct++;
