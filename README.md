@@ -170,4 +170,4 @@ Next.js, React, TypeScript, Excalidraw, Dagre and Dexie. Regression checks use V
 
 ## License
 
-MIT. See [LICENSE](LICENSE) for the original copyright and terms. SaySketch builds on [YapDraw](https://github.com/rickytang666/yapdraw) and [Excalidraw](https://github.com/excalidraw/excalidraw).
+MIT.
