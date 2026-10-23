@@ -96,6 +96,74 @@ npm run test:e2e
 
 Browser tests use controlled service responses. Verify actual Wispr dictation, provider behavior and the deployed experience separately before publishing or recording the final demo.
 
+## Architecture
+
+The browser owns the editable scene and local documents. Next.js routes handle generation and edit planning; the canvas remains the source of truth for subsequent changes.
+
+```mermaid
+flowchart TB
+  flow["Wispr Flow desktop dictation"] --> composer
+  keyboard["Typing or paste"] --> composer
+  subgraph browser["Browser"]
+    composer["Instruction composer"] --> editor["Editor and command lifecycle"]
+    editor <--> canvas["Excalidraw native scene"]
+    canvas --> save["Autosave and checkpoints"]
+    save --> storage[("IndexedDB through Dexie")]
+    storage --> library["Library and history"]
+    library --> canvas
+    canvas --> exports["Editable backups, PNG, SVG and Mermaid"]
+  end
+  subgraph server["Next.js server"]
+    guard["Request bounds, rate limits and kill switch"]
+    generate["POST /api/generate-diagram"]
+    plan["POST /api/plan-edit"]
+    layout["Dagre initial layout and icons"]
+    example["GET /api/example: static sample"]
+    guard --> generate
+    guard --> plan
+    generate --> layout
+  end
+  editor -->|"Instruction and diagram context"| guard
+  generate <--> provider["Configured provider: Groq, OpenRouter or Google"]
+  plan <--> provider
+  guard -.-> redis[("Optional shared Redis limiter")]
+  layout -->|"Initial scene"| editor
+  plan -->|"Validated operations or clarification"| editor
+  example -->|"Ready-made checkout scene"| editor
+```
+
+Flow inserts text into the composer through the desktop app. It does not connect to a SaySketch speech endpoint. Documents and embedded files stay in browser storage; submitted instructions and diagram context travel to the configured provider through the server. The optional Deepgram path is disabled by default and omitted from this diagram.
+
+### How an instruction becomes an edit
+
+Initial creation uses automatic layout. Later instructions operate on the current scene through bounded patches.
+
+```mermaid
+flowchart TD
+  input["Instruction submitted"] --> empty{"Canvas empty?"}
+  empty -->|"Yes"| create["Generate graph and lay out initial scene"]
+  create --> initial["Check live scene has not changed"]
+  initial --> canvas["Update native canvas"]
+  empty -->|"No"| context["Read live nodes, connections and selection"]
+  context --> snapshot["Capture content snapshot"]
+  snapshot --> planner["Request and validate an edit plan"]
+  planner --> outcome{"Plan result"}
+  outcome -->|"Question or no change"| notice["Show message without modifying the scene"]
+  outcome -->|"Operations"| candidate["Build candidate patch and verify references"]
+  candidate --> mode{"Auto draw and no removals?"}
+  mode -->|"Yes"| check
+  mode -->|"No"| review["Review proposal"]
+  review -->|"Cancel"| discard["Discard proposal"]
+  review -->|"Apply"| check["Check snapshot and save pre-change checkpoint"]
+  check --> recheck{"Live scene still matches?"}
+  recheck -->|"No"| conflict["Reject stale proposal and offer to plan again"]
+  recheck -->|"Yes"| commit["Apply as one native undo step"]
+  commit --> canvas
+  canvas --> persist["Autosave current scene and files"]
+```
+
+Validation and request failures leave the current scene intact. Edits are checked again after checkpoint saving, and ordinary patches preserve the viewport and unrelated elements. Native undo handles the in-session edit history; saved checkpoints provide a separate durable recovery path.
+
 ## Built with
 
 Next.js, React, TypeScript, Excalidraw, Dagre and Dexie. Regression checks use Vitest and Playwright.
