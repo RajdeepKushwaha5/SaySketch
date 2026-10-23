@@ -2,58 +2,104 @@
 
 **Talk your diagrams into shape.**
 
-SaySketch is a diagramming project being developed for the Wispr challenge. The goal is to create and refine architecture diagrams and process flows conversationally while preserving the user's layout and manual edits.
+Turn a spoken explanation into an editable diagram, then refine it without starting over. SaySketch combines natural-language instructions with a drawing canvas for system architecture, process flows and technical documentation.
 
-**How it works:** on an empty canvas, describe a diagram and it is generated. After that, every instruction becomes a small reviewed patch: the model proposes operations (add, rename, connect, remove), the app validates them against the live canvas, shows what will change, and applies only on **Apply** — nothing else moves. One Ctrl/Cmd+Z undoes a whole instruction. Select shapes first to point at them ("connect this to the database"). See [PROJECT-PLAN.md](PROJECT-PLAN.md) for the finalized direction and [BUILD-CHECKLIST.md](BUILD-CHECKLIST.md) for verified progress.
+Describe the system. Move things by hand. Ask for a change. Keep the work you already did.
+
+## Try it
+
+Choose **Try the example** on the home page, or open `/d/new?example=1` for a ready-made checkout architecture.
+
+> Add a queue for confirmation emails after the orders service.
+
+Review the proposed change and select **Apply**. Click the canvas and press **Ctrl/Cmd+Z** to undo it.
 
 ## Features
 
-- Editable Excalidraw canvas and automatic graph layout.
-- AI diagram generation on an empty canvas; reviewed, preserving patches for every later instruction.
-- Browser-local diagram library, folders and saved versions.
-- Native/project import and visual/graph export entry points.
-- Optional Deepgram microphone transcription and provider settings.
+- Create architecture diagrams and process flows from a description.
+- Add, rename, connect and remove components through instructions.
+- Select a component before referring to it as "this" in an instruction.
+- Combine conversational edits with native drawing, text, colors and positioning.
+- Review changes before applying them, or enable Auto draw for additions and renames.
+- Undo and redo edits using canvas history.
+- Organize documents in a browser-local library with folders, search and saved checkpoints.
+- Import editable backups and export .excalidraw, JSON, PNG and SVG.
+- Copy supported graph structure as Mermaid for documentation.
 
-Full generation (with automatic layout) only runs on an empty canvas. Edits never relayout: new nodes are placed next to the node they relate to, clear of shapes and arrows, and a change that has no free space is refused rather than moving your work.
+Ordinary instruction edits do not run a full-scene layout. New components are placed without moving unrelated content. Ambiguous instructions, unsupported edits and placement failures can require clarification or manual adjustment.
 
-## Development
+## Using Wispr Flow
 
-Use Node 22 (verified locally with 22.20.0). The repository's `.npmrc` uses legacy peer resolution because the Excalidraw package declares older React peers. This does not establish browser compatibility; runtime editor tests remain required.
+1. Open a diagram and press **Ctrl/Cmd+K** to focus the instruction box.
+2. Activate your configured Wispr Flow shortcut and dictate.
+3. In review mode, press **Enter**, inspect the proposal and select **Apply**.
+
+**Auto draw** submits after text stops changing for 1.8 seconds. It draws an initial description and automatically applies validated additions and renames. Deletions still require review. Turn it off when you want to compose without submitting on a pause.
+
+This mode responds to inserted text, including typing and paste. If Flow inserts text when you finish dictating, drawing starts after that insertion. Keep the instruction box focused while speaking.
+
+**Shift+Enter** inserts a new line. Failed instructions remain available for correction or retry.
+
+## Run locally
+
+Requires Node.js 22 and npm.
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
 ```
 
-Copy `.env.example` to `.env.local` and configure a server model credential. `GROQ_API_KEY` funds the inherited default model path. Model availability and quotas must be verified before release. Deepgram credentials are optional for its microphone feature. Do not enable its public token endpoint without the protection described in the plan.
+Copy `.env.example` to `.env.local` and configure your Groq credential:
+
+```dotenv
+GROQ_API_KEY=your_key_here
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+```
+
+Optionally set `GROQ_MODEL` to a supported model available to your account. Never commit `.env.local` or publish credentials.
 
 ```sh
 npm run dev
 ```
 
-Open http://localhost:3000. Set `NEXT_PUBLIC_BASE_URL` to your own deployment URL when deploying; no production domain is configured by this rebrand.
+Open [localhost:3000](http://localhost:3000). The included `.npmrc` accommodates peer dependency declarations in the canvas dependency tree.
 
-Baseline checks:
+For a production build:
 
 ```sh
-npm run lint
-npm run typecheck
-npm test          # unit tests, no credentials needed
-npm run test:e2e  # browser tests (Playwright; model calls are stubbed)
 npm run build
+npm start
 ```
 
-Lint has zero errors (six inherited warnings). The browser suite verifies arrow binding, select-dictate-preview-apply, one-step undo/redo, stale-edit conflicts, clarifications and that the live-canvas Mermaid export parses. Live-model accuracy is **not** measured yet (it needs a configured key), and diagrams saved before arrow binding keep their old unbound arrows.
+Before public hosting, configure shared request limiting with `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, verify provider quotas and set your public base URL. Without shared configuration, limiting is per server process. If a configured shared limiter becomes unavailable, requests are blocked rather than silently weakening protection. See `.env.example` for operational switches.
 
-### Current implementation boundary
+The optional Deepgram microphone is separate from Wispr Flow and disabled by default. Its client and server switches, credentials and access protection must be configured before enabling it. Flow dictation does not require Deepgram.
 
-Supported edits: add node, add connection (optionally labelled), rename node/connection, remove node (with its connections) or connection. Moving, recolouring, grouping and re-arranging are answered with a clarification for now. Model-funded routes have a kill switch (`AI_DISABLED=1`), request-size and instruction limits, and a per-process rate limit — enough for a protected preview, **not** for a public multi-instance deployment, which needs a shared limiter (see the plan).
+## Saving and backups
 
-## Wispr and data handling
+Documents are stored in this browser using IndexedDB. They do not automatically synchronize across devices. Wait for **Saved** before refreshing or closing, and export important documents as editable backups.
 
-Wispr Flow dictates straight into the instruction box (Ctrl/Cmd+K focuses it; Enter sends, Shift+Enter adds a line). Dictated text stays in the box if the planner asks a question or fails. The old Deepgram microphone is hidden unless `NEXT_PUBLIC_ENABLE_DEEPGRAM=1`, and its key-minting route is off unless `DEEPGRAM_ENABLED=1`.
+JSON and .excalidraw backups include embedded image data. PNG and SVG are visual exports. Mermaid represents supported nodes and connections; it cannot preserve every annotation, image or canvas style.
 
-Diagrams are stored in this browser. AI instructions and diagram context are processed by external model services; microphone audio goes to Deepgram when that feature is used. Local storage is not cloud sync or an offline-processing guarantee. Keep editable backups and avoid sensitive content until handling is suitable for your use.
+Use one editing tab per document. Concurrent editing across tabs is not supported. History previews are read-only; return to the current scene before issuing instructions.
+
+Instructions and relevant diagram context are sent to the configured external provider. This is not an entirely offline application. Personal credentials entered in Settings are kept in session storage for the current tab.
+
+## Checks
+
+```sh
+npm run typecheck
+npm run lint
+npm test
+npx playwright install chromium
+npm run test:e2e
+```
+
+Browser tests use controlled service responses. Verify actual Wispr dictation, provider behavior and the deployed experience separately before publishing or recording the final demo.
+
+## Built with
+
+Next.js, React, TypeScript, Excalidraw, Dagre and Dexie. Regression checks use Vitest and Playwright.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE) for the original copyright and terms. SaySketch builds on [YapDraw](https://github.com/rickytang666/yapdraw) and [Excalidraw](https://github.com/excalidraw/excalidraw).

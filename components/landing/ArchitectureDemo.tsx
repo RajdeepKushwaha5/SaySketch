@@ -4,31 +4,31 @@ import { useEffect, useState, useRef } from "react";
 import rough from "roughjs";
 import { Indie_Flower } from "next/font/google";
 import {
-  siReact,
-  siCloudflare,
-  siFastify,
-  siGo,
-  siApachekafka,
-  siMysql,
-  siSupabase,
-  siRedis,
-  siDatadog,
-  siClerk,
+  siNextdotjs,
+  siStripe,
+  siGraphql,
+  siNodedotjs,
+  siRabbitmq,
+  siMongodb,
+  siPostgresql,
+  siResend,
+  siSentry,
+  siAuth0,
 } from "simple-icons";
 
 const indieFlower = Indie_Flower({ subsets: ["latin"], weight: "400" });
 
 const transcriptionText = [
-  "so we've got a React frontend...",
-  "...it hits a Fastify API gateway...",
-  "...Clerk handles the auth...",
-  "...which calls into our Go core service...",
-  "...that publishes events to a Kafka topic...",
-  "...and writes to MySQL.",
-  "wait — actually we're on Supabase, not MySQL...",
-  "...oh and Redis in front for caching.",
-  "...Datadog watching the gateway too.",
-  "...and Cloudflare sitting in front of the Go backend.",
+  "our online store starts with a Next.js storefront...",
+  "...checkout calls a GraphQL gateway...",
+  "...Auth0 signs customers in...",
+  "...then our Node.js service creates the order...",
+  "...and queues fulfillment jobs in RabbitMQ...",
+  "...with the order saved in MongoDB.",
+  "wait, use Postgres for orders, not MongoDB...",
+  "...Resend sends the order confirmation...",
+  "...Sentry monitors the checkout gateway...",
+  "...and Stripe sends payment webhooks to Orders.",
 ];
 
 export default function ArchitectureDemo() {
@@ -120,7 +120,7 @@ export default function ArchitectureDemo() {
         [238, 307],
         20,
       );
-    // fastify -> go
+    // GraphQL gateway -> Orders API
     if (step >= 3)
       drawArrow(
         [
@@ -251,16 +251,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siReact.hex}` }}
+              style={{ color: `#${siNextdotjs.hex}` }}
               fill="currentColor"
             >
-              <path d={siReact.path} />
+              <path d={siNextdotjs.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Frontend
+              Storefront
             </span>
           </div>
 
@@ -270,16 +270,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siFastify.hex}` }}
+              style={{ color: `#${siGraphql.hex}` }}
               fill="currentColor"
             >
-              <path d={siFastify.path} />
+              <path d={siGraphql.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              API Gateway
+              GraphQL
             </span>
           </div>
 
@@ -289,16 +289,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siClerk.hex}` }}
+              style={{ color: `#${siAuth0.hex}` }}
               fill="currentColor"
             >
-              <path d={siClerk.path} />
+              <path d={siAuth0.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Clerk
+              Auth0
             </span>
           </div>
 
@@ -308,16 +308,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-5 h-4"
-              style={{ color: `#${siGo.hex}` }}
+              style={{ color: `#${siNodedotjs.hex}` }}
               fill="currentColor"
             >
-              <path d={siGo.path} />
+              <path d={siNodedotjs.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Core Service
+              Orders API
             </span>
           </div>
 
@@ -327,37 +327,37 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siApachekafka.hex}` }}
+              style={{ color: `#${siRabbitmq.hex}` }}
               fill="currentColor"
             >
-              <path d={siApachekafka.path} />
+              <path d={siRabbitmq.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Kafka Topic
+              RabbitMQ
             </span>
           </div>
 
           <div
-            className={`absolute top-[320px] left-[460px] w-[100px] h-[70px] bg-[#fffdf8] border-2 rounded-full flex flex-col items-center justify-center gap-1.5 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] transform ${step >= 5 ? "opacity-100 scale-100" : "opacity-0 scale-95"} ${step >= 6 ? "border-[#3FCF8E] shadow-[3px_3px_0_#3FCF8E]" : "border-[#1a1714] shadow-[3px_3px_0_#1a1714]"}`}
+            className={`absolute top-[320px] left-[460px] w-[100px] h-[70px] bg-[#fffdf8] border-2 rounded-full flex flex-col items-center justify-center gap-1.5 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] transform ${step >= 5 ? "opacity-100 scale-100" : "opacity-0 scale-95"} ${step >= 6 ? "border-[#4169E1] shadow-[3px_3px_0_#4169E1]" : "border-[#1a1714] shadow-[3px_3px_0_#1a1714]"}`}
           >
             {step < 6 ? (
               <>
                 <svg
                   viewBox="0 0 24 24"
                   className="w-4 h-4"
-                  style={{ color: `#${siMysql.hex}` }}
+                  style={{ color: `#${siMongodb.hex}` }}
                   fill="currentColor"
                 >
-                  <path d={siMysql.path} />
+                  <path d={siMongodb.path} />
                 </svg>
                 <span
                   className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
                   style={{ fontWeight: 600 }}
                 >
-                  MySQL
+                  MongoDB
                 </span>
               </>
             ) : (
@@ -365,16 +365,16 @@ export default function ArchitectureDemo() {
                 <svg
                   viewBox="0 0 24 24"
                   className="w-4 h-4"
-                  style={{ color: `#${siSupabase.hex}` }}
+                  style={{ color: `#${siPostgresql.hex}` }}
                   fill="currentColor"
                 >
-                  <path d={siSupabase.path} />
+                  <path d={siPostgresql.path} />
                 </svg>
                 <span
                   className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
                   style={{ fontWeight: 600 }}
                 >
-                  Supabase
+                  Postgres
                 </span>
               </>
             )}
@@ -386,16 +386,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siRedis.hex}` }}
+              style={{ color: `#${siResend.hex}` }}
               fill="currentColor"
             >
-              <path d={siRedis.path} />
+              <path d={siResend.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Redis Cache
+              Resend
             </span>
           </div>
 
@@ -405,16 +405,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siDatadog.hex}` }}
+              style={{ color: `#${siSentry.hex}` }}
               fill="currentColor"
             >
-              <path d={siDatadog.path} />
+              <path d={siSentry.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Datadog Agent
+              Sentry
             </span>
           </div>
 
@@ -424,16 +424,16 @@ export default function ArchitectureDemo() {
             <svg
               viewBox="0 0 24 24"
               className="w-4 h-4"
-              style={{ color: `#${siCloudflare.hex}` }}
+              style={{ color: `#${siStripe.hex}` }}
               fill="currentColor"
             >
-              <path d={siCloudflare.path} />
+              <path d={siStripe.path} />
             </svg>
             <span
               className={`text-[14px] text-[#1a1714] ${indieFlower.className}`}
               style={{ fontWeight: 600 }}
             >
-              Cloudflare
+              Stripe
             </span>
           </div>
         </div>
