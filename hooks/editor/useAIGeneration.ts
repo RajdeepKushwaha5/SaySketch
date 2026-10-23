@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { db } from "@/lib/db";
 import { buildDebrief } from "@/lib/ai/debrief";
+import { sceneSnapshot } from "@/lib/scene/patch";
 import { useAIChangeHistory } from "@/hooks/editor/useAIChangeHistory";
 import type { LoadingPhase } from "@/components/editor/LoadingIndicator";
 import type { ExcalidrawCanvasHandle } from "@/components/editor/ExcalidrawCanvas";
@@ -35,6 +36,11 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
     startElements: ExcalidrawElement[];
     hasChanges: boolean;
   } | null>(null);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+  }, [id]);
 
   useEffect(() => {
     if (diagram && !lastGraphInitRef.current && diagram.graph) {
@@ -78,10 +84,12 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
     }
   }
 
-  async function handleSilence(text: string) {
-    if (!text.trim() || !diagram || diagram.locked) return;
+  /** Resolves true only when a diagram was drawn, so callers can keep the instruction on failure. */
+  async function handleSilence(text: string): Promise<boolean> {
+    if (!text.trim() || !diagram || diagram.locked) return false;
     abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoadingPhase("generating");
 
     // mic flow reuses session snapshot; keyboard-only takes a new one
@@ -112,6 +120,7 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transcript: text,
+          diagramType: diagram.diagramType,
           currentGraph: hasCanvas ? lastGraph : null,
           manualEditDebrief: debrief,
           providerConfig: {
@@ -120,12 +129,16 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
           },
         }),
         signal: AbortSignal.any([
-          abortRef.current.signal,
+          controller.signal,
           AbortSignal.timeout(30000),
         ]),
       });
       const data = await res.json();
-      if (data.skipped) return;
+      if (controller.signal.aborted || abortRef.current !== controller) return false;
+      if (data.skipped) {
+        showError("couldn't draw that — try describing it differently");
+        return false;
+      }
       if (data.usedFallback)
         showError("api key invalid — used free tier instead");
       if (!res.ok || !data.elements) {
@@ -134,7 +147,8 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
           await db.versions.delete(versionId!);
           lastAIVersionIdRef.current = null;
         }
-        return;
+        showError(data.error ?? "something went wrong — try again");
+        return false;
       }
 
       const {
@@ -146,6 +160,11 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
         graph: GraphResponse;
         files: BinaryFileData[];
       } = data;
+      if (sceneSnapshot(canvasRef.current?.getElements() ?? []) !== sceneSnapshot(liveElements)) {
+        if (!session) await db.versions.delete(versionId!);
+        showError("the canvas changed while drawing — nothing was replaced; try again");
+        return false;
+      }
       setLastGraph(graph);
       setLoadingPhase("rendering");
       canvasRef.current?.updateDiagram(elements, { replace: true, files });
@@ -162,8 +181,9 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
         metadata: { ...diagram.metadata, generatedVia: "voice" },
         graph,
       });
+      return true;
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return false;
       if (!session) {
         await db.versions.delete(versionId!);
         lastAIVersionIdRef.current = null;
@@ -174,8 +194,9 @@ export function useAIGeneration({ id, diagram, canvasRef, settings }: Options) {
         console.error("Failed to generate diagram:", err);
         showError("something went wrong — try again");
       }
+      return false;
     } finally {
-      setLoadingPhase("idle");
+      if (abortRef.current === controller && !controller.signal.aborted) setLoadingPhase("idle");
     }
   }
 

@@ -55,6 +55,36 @@ async function generate(page: Page, g: GraphResponse = graph) {
 
 const PROPOSAL = { status: "proposal", operations: [{ type: "addNode", ref: "new-1", label: "Cache", near: "api" }, { type: "addEdge", from: "api", to: "new-1" }] };
 
+test("Auto draw creates after a pause, applies additions and preserves manual-review deletions", async ({ page }) => {
+  const { elements } = layoutGraph(graph);
+  await page.route("**/api/generate-diagram", route => route.fulfill({ json: { elements, graph, files: [] } }));
+  await page.route("**/api/plan-edit", route => route.fulfill({ json: PROPOSAL }));
+  await page.goto("/d/new");
+  await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+  await page.getByRole("switch", { name: "Auto draw after a pause" }).click();
+  const composer = page.getByTestId("composer");
+  await composer.fill("A web frontend calls an API, which reads a database");
+  await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow").length, { timeout: 30_000 }).toBe(2);
+  await expect(composer).toHaveValue("");
+  const before = await scene(page);
+  await composer.fill("Add a cache after the API");
+  await expect(page.getByTestId("notice")).toContainText("Applied", { timeout: 30_000 });
+  const after = await scene(page);
+  expect(after.filter(el => !el.isDeleted && el.type === "rectangle")).toHaveLength(4);
+  for (const id of ["web", "api", "db"]) {
+    const original = live(before, id)!;
+    expect(live(after, id)).toMatchObject({ x: original.x, y: original.y, width: original.width, height: original.height });
+  }
+  await page.unroute("**/api/plan-edit");
+  await page.route("**/api/plan-edit", route => route.fulfill({ json: { status: "proposal", operations: [{ type: "removeNode", id: "db" }] } }));
+  await composer.fill("Remove the database");
+  await expect(page.getByTestId("proposal")).toBeVisible({ timeout: 30_000 });
+  expect(live(await scene(page), "db")).toBeTruthy();
+  await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(live(await scene(page), "db")).toBeTruthy();
+});
+
 test("generated arrows follow dragged nodes; a patch is one native undo step in chronological order", async ({ page }) => {
   await generate(page);
   const generated = await scene(page);
@@ -205,4 +235,70 @@ test("a clarification keeps the dictated instruction for editing", async ({ page
   await expect(page.getByTestId("notice")).toHaveAttribute("data-kind", "question");
   await expect(page.getByTestId("notice")).toContainText("Which database do you mean?");
   await expect(composer).toHaveValue("rename the database to Postgres");
+});
+
+test("the example diagram opens ready to edit, with suggestions, and accepts a patch", async ({ page }) => {
+  await page.goto("/d/new?example=1");
+  await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+  await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow").length, { timeout: 30_000 }).toBe(5);
+  const els = await scene(page);
+  expect(els.filter(el => el.type === "rectangle" && el.customData?.yapdraw?.type === "node")).toHaveLength(6);
+  expect(els.filter(el => el.type === "arrow").every(a => a.startBinding?.elementId && a.endBinding?.elementId)).toBe(true);
+  await expect(page).toHaveURL(/\/d\/[^?]+$/); // the one-shot flag is dropped
+  await expect(page.getByText("Try saying", { exact: true })).toBeVisible();
+
+  await page.route("**/api/plan-edit", route => route.fulfill({ json: { status: "proposal", operations: [
+    { type: "addNode", ref: "new-1", label: "Email Queue", near: "orders" }, { type: "addEdge", from: "orders", to: "new-1" },
+  ] } }));
+  await page.getByRole("button", { name: /Add a queue for confirmation emails/ }).click();
+  await page.getByTestId("proposal").getByRole("button", { name: "Apply" }).click();
+  await expect.poll(async () => (await scene(page)).some(el => el.type === "text" && el.text === "Email Queue" && !el.isDeleted)).toBe(true);
+});
+
+test("a failed generation keeps the instruction in the box", async ({ page }) => {
+  await page.route("**/api/generate-diagram", route => route.fulfill({ status: 429, json: { error: "Too many requests. Try again in 30s." } }));
+  await page.goto("/d/new");
+  await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+  const composer = page.getByTestId("composer");
+  await composer.fill("Draw web, API and database");
+  await composer.press("Enter");
+  await expect(page.getByText("Too many requests. Try again in 30s.")).toBeVisible();
+  await expect(composer).toHaveValue("Draw web, API and database");
+});
+
+test("JSON backup includes embedded files", async ({ page }) => {
+  await page.goto("/d/new?example=1");
+  await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+  await expect.poll(async () => (await scene(page)).filter(el => el.type === "image").length, { timeout: 30_000 }).toBeGreaterThan(0);
+  await page.locator("button:has(svg.tabler-icon-dots-vertical)").first().click();
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export as JSON" }).click()]);
+  const backup = JSON.parse(await (await import("node:fs/promises")).readFile((await download.path())!, "utf8"));
+  const imageFileIds = backup.elements.filter((el: { type: string }) => el.type === "image").map((el: { fileId: string }) => el.fileId);
+  expect(imageFileIds.length).toBeGreaterThan(0);
+  for (const fileId of imageFileIds) expect(backup.files[fileId]?.dataURL).toMatch(/^data:image\//);
+});
+
+test("history preview blocks instructions and returns to the current editable scene", async ({ page }) => {
+  const composer = await generate(page);
+  await expect(composer).toHaveValue("");
+  await page.getByRole("button", { name: "Save version checkpoint" }).click();
+  await expect(page.getByRole("button", { name: "v2now", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "v1", exact: true }).click();
+  await expect(composer).toBeDisabled();
+  await expect(page.getByText("History preview — return to current to edit")).toBeVisible();
+  await page.getByRole("button", { name: "Back to current", exact: true }).click();
+  await expect(composer).toBeEnabled();
+  await expect.poll(async () => (await scene(page)).filter(el => el.type === "arrow" && !el.isDeleted).length).toBe(2);
+});
+
+test("Back to library saves a rapid manual edit before navigation", async ({ page }) => {
+  await generate(page);
+  const editorUrl = page.url();
+  await drag(page, "db", 0, 90);
+  const movedY = live(await scene(page), "db")!.y;
+  await page.getByRole("button", { name: "Back to library", exact: true }).click();
+  await expect(page).toHaveURL(/\/library$/, { timeout: 30_000 });
+  await page.goto(editorUrl);
+  await page.waitForFunction(() => (window as unknown as { __saysketch?: { api: () => unknown } }).__saysketch?.api(), null, { timeout: 90_000 });
+  expect(live(await scene(page), "db")!.y).toBe(movedY);
 });

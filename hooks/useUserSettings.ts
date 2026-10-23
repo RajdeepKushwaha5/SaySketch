@@ -10,7 +10,9 @@ export interface UserSettings {
   apiKey: string; // empty → Groq
 }
 
+// Provider choice persists; a personal API key lives in sessionStorage (this tab only, cleared on close).
 const STORAGE_KEY = "yapdraw-user-settings";
+const SESSION_KEY_STORAGE = "saysketch-session-api-key";
 
 const DEFAULT_SETTINGS: UserSettings = {
   provider: "openrouter",
@@ -24,9 +26,16 @@ let didScheduleHydrate = false;
 function load(): UserSettings {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Partial<UserSettings>;
+    // Older versions kept the key in localStorage; move it to this session and drop it from disk.
+    if (stored.apiKey) {
+      if (!sessionStorage.getItem(SESSION_KEY_STORAGE)) sessionStorage.setItem(SESSION_KEY_STORAGE, stored.apiKey);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ provider: stored.provider ?? DEFAULT_SETTINGS.provider }));
+    }
+    return {
+      provider: stored.provider ?? DEFAULT_SETTINGS.provider,
+      apiKey: sessionStorage.getItem(SESSION_KEY_STORAGE) ?? "",
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -83,7 +92,9 @@ export function useUserSettings() {
           : update;
       clientCache = next;
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ provider: next.provider }));
+        if (next.apiKey) sessionStorage.setItem(SESSION_KEY_STORAGE, next.apiKey);
+        else sessionStorage.removeItem(SESSION_KEY_STORAGE);
       } catch {
         /* ignore quota / private mode */
       }

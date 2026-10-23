@@ -78,7 +78,8 @@ const EditorMenu = forwardRef<EditorMenuHandle, Props>(function EditorMenu(
 
   function handleExportJSON() {
     setIsOpen(false);
-    exportAsJSON(diagram);
+    const canvas = canvasRef.current;
+    exportAsJSON(canvas ? { ...diagram, elements: canvas.getElements(), files: canvas.getFiles() } : diagram);
   }
 
   function handleExportPng() {
@@ -114,11 +115,11 @@ const EditorMenu = forwardRef<EditorMenuHandle, Props>(function EditorMenu(
       <button
         ref={buttonRef}
         onClick={() => setIsOpen((v) => !v)}
-        className="p-1.5 text-subtle hover:text-foreground hover:bg-surface rounded transition-colors"
+        className="icon-btn"
         aria-label="More options"
         aria-expanded={isOpen}
       >
-        <IconDotsVertical size={16} />
+        <IconDotsVertical size={18} />
       </button>
 
       {isOpen && (

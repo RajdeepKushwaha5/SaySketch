@@ -26,6 +26,7 @@ export interface ExcalidrawCanvasHandle {
   ) => void;
   /** Commit a reviewed patch candidate as one native undo step; viewport is left alone. */
   applyPatch: (elements: ExcalidrawElement[], affectedIds: string[]) => void;
+  setReadOnly: (readOnly: boolean) => void;
   getSelectedIds: () => string[];
   /** Highlight elements by selecting them; not recorded in undo history. */
   select: (ids: string[]) => void;
@@ -64,10 +65,12 @@ interface Props {
   initialFiles?: Record<string, BinaryFileData>;
   onChange?: (elements: ExcalidrawElement[]) => void;
   onSelectionChange?: (ids: string[]) => void;
+  /** Fires once the canvas API and element converters are available. */
+  onReady?: () => void;
 }
 
 const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, Props>(
-  ({ initialElements, initialFiles, onChange, onSelectionChange }, ref) => {
+  ({ initialElements, initialFiles, onChange, onSelectionChange, onReady }, ref) => {
     const [Excalidraw, setExcalidraw] = useState<
       typeof import("@excalidraw/excalidraw").Excalidraw | null
     >(null);
@@ -241,6 +244,12 @@ const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, Props>(
           animate: true,
           duration: 400,
         });
+      },
+
+      setReadOnly(readOnly) {
+        const api = apiRef.current;
+        const mod = excalidrawModRef.current;
+        if (api && mod) api.updateScene({ appState: { viewModeEnabled: readOnly }, captureUpdate: mod.CaptureUpdateAction.NEVER });
       },
 
       applyPatch(incoming, affectedIds) {
@@ -423,6 +432,8 @@ const ExcalidrawCanvas = forwardRef<ExcalidrawCanvasHandle, Props>(
           excalidrawAPI={(api: ExcalidrawImperativeAPI) => {
             apiRef.current = api;
             setHasMountedWithData(true);
+            // after this render commits, so the imperative handle sees the API
+            setTimeout(() => onReady?.(), 0);
           }}
           onChange={handleChange}
           theme="light"

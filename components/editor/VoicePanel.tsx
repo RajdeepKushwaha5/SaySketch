@@ -6,7 +6,9 @@ import {
   useRef,
   useState,
   useEffect,
+  useEffectEvent,
 } from "react";
+import { scheduleAutoDraw } from "@/lib/scene/auto-draw";
 import { IconSend, IconX } from "@tabler/icons-react";
 import MicButton from "./MicButton";
 import InterimIndicator from "./InterimIndicator";
@@ -33,6 +35,8 @@ interface VoicePanelProps {
   onSilence: (transcript: string) => void;
   /** Returns true when the instruction was accepted, so the composer can clear. */
   onSubmit: (text: string) => Promise<boolean> | boolean;
+  autoDraw: boolean;
+  onAutoDrawChange: (enabled: boolean) => void;
   onMicStart?: () => void;
   onMicStop?: () => void;
   canvasRef: React.RefObject<ExcalidrawCanvasHandle | null>;
@@ -47,6 +51,8 @@ interface VoicePanelProps {
   onApply: () => void;
   onCancel: () => void;
   onDismissNotice: () => void;
+  /** Overrides the default creation prompts (e.g. edit suggestions for the example diagram). */
+  examples?: { label: string; prompt: string }[];
 }
 
 const NOTICE_STYLES: Record<CommandNotice["kind"], string> = {
@@ -64,6 +70,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       isLoading,
       onSilence,
       onSubmit,
+      autoDraw,
+      onAutoDrawChange,
       onMicStart,
       onMicStop,
       canvasRef,
@@ -78,12 +86,17 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       onApply,
       onCancel,
       onDismissNotice,
+      examples,
     },
     ref,
   ) {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const timelineRef = useRef<VersionTimelineHandle>(null);
     const [draft, setDraft] = useState("");
+    const [composing, setComposing] = useState(false);
+    const [historyPreview, setHistoryPreview] = useState(false);
+    const submittingRef = useRef(false);
+    const attemptedDraftRef = useRef("");
     const [messages, setMessages] = useState<string[]>([]);
     const [speed, setSpeed] = useState<SpeechSpeed>(() => {
       if (typeof window === "undefined") return "normal";
@@ -139,15 +152,31 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
       }
     };
 
-    const busy = isLoading || phase === "planning" || phase === "applying";
+    const operationBusy = isLoading || phase === "planning" || phase === "applying";
+    const busy = operationBusy || historyPreview;
 
     // The dictated text stays in the box unless the instruction was accepted.
     const send = async (text: string) => {
       const instruction = text.trim();
-      if (!instruction || busy) return;
+      if (!instruction || busy || submittingRef.current) return;
+      submittingRef.current = true;
+      attemptedDraftRef.current = instruction;
       setMessages((prev) => [...prev, instruction]);
-      if (await onSubmit(instruction)) setDraft((current) => (current.trim() === instruction ? "" : current));
+      try {
+        if (await onSubmit(instruction)) setDraft((current) => (current.trim() === instruction ? "" : current));
+      } finally {
+        submittingRef.current = false;
+      }
     };
+
+    const submitAfterPause = useEffectEvent(() => {
+      // A failed/ambiguous instruction stays editable, without a paid automatic retry loop.
+      if (attemptedDraftRef.current !== draft.trim()) void send(draft);
+    });
+    useEffect(() => {
+      if (!autoDraw || !draft.trim() || busy || isListening || composing || phase !== "idle") return;
+      return scheduleAutoDraw(submitAfterPause);
+    }, [autoDraw, draft, busy, isListening, composing, phase]);
 
     return (
       <div className="flex flex-col h-full bg-background text-foreground">
@@ -158,6 +187,8 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
           onRestoreAnimation={onRestoreAnimation}
           pauseSave={pauseSave}
           resumeSave={resumeSave}
+          disabled={operationBusy}
+          onPreviewChange={setHistoryPreview}
         />
 
         {DEEPGRAM_ENABLED ? (
@@ -191,24 +222,21 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
               ))}
             </div>
           </div>
-        ) : (
-          <div className="px-5 pt-5 pb-2">
-            <p className="font-display text-[22px] font-extrabold tracking-tight leading-tight text-foreground">Talk your diagram<br />into shape.</p>
-            <p className="text-xs text-subtle mt-1 leading-relaxed">
-              Dictate with Wispr Flow or type. Select shapes first to point at them — then say what should change.
-              Ctrl/Cmd+K jumps to the box.
+        ) : messages.length === 0 && !finalTranscript ? (
+          <div className="px-5 pt-5 pb-1">
+            <p className="font-display text-[24px] font-extrabold tracking-tight leading-[1.1] text-foreground">Talk your diagram<br />into shape.</p>
+            <p className="text-[13px] text-subtle mt-2 leading-relaxed">
+              Dictate with Wispr Flow or type. Select shapes to point at them, then say what should change.
             </p>
           </div>
-        )}
+        ) : null}
 
         <div className="flex-1 overflow-y-auto">
-          <div className="py-3 space-y-2 px-4">
-            {messages.length === 0 && !finalTranscript && (
-              <div className="hidden lg:contents">
-                <p className="text-placeholder text-xs px-1 pb-1">
-                  Try an example:
-                </p>
-                {[
+          <div className="px-4 py-3 space-y-2">
+            {messages.length === 0 && !finalTranscript ? (
+              <div className="hidden lg:block space-y-2">
+                <p className="section-label px-1 pb-0.5">{examples ? "Try saying" : "Try an example"}</p>
+                {(examples ?? [
                   {
                     label: "React → Node API → Postgres & Redis",
                     prompt:
@@ -224,7 +252,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
                     prompt:
                       "Customer places an order, warehouse picks and packs it, courier delivers it, customer confirms receipt",
                   },
-                ].map(({ label, prompt }) => (
+                ]).map(({ label, prompt }) => (
                   <button
                     key={label}
                     disabled={busy || isListening}
@@ -235,17 +263,26 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
                   </button>
                 ))}
               </div>
+            ) : (
+              <p className="section-label px-1 pb-0.5">Your instructions</p>
             )}
-            {messages.map((msg, i) => (
-              <p
-                key={i}
-                className="text-foreground text-sm px-1 leading-relaxed whitespace-pre-wrap"
-              >
-                {msg}
-              </p>
-            ))}
+            {messages.map((msg, i) => {
+              const latest = i === messages.length - 1 && !finalTranscript;
+              return (
+                <p
+                  key={i}
+                  className={`text-[14px] leading-relaxed whitespace-pre-wrap rounded-xl px-3.5 py-2.5 border-l-[3px] transition-colors ${
+                    latest
+                      ? "bg-paper text-foreground border-accent shadow-[0_8px_20px_-14px_rgba(74,52,20,0.55)]"
+                      : "bg-paper/55 text-muted border-transparent"
+                  }`}
+                >
+                  {msg}
+                </p>
+              );
+            })}
             {finalTranscript && (
-              <p className="text-foreground text-sm px-1 leading-relaxed whitespace-pre-wrap">
+              <p className="text-[14px] leading-relaxed whitespace-pre-wrap rounded-xl px-3.5 py-2.5 bg-paper text-foreground border-l-[3px] border-accent">
                 {finalTranscript}
               </p>
             )}
@@ -265,7 +302,7 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
               <button
                 onClick={() => { onDismissNotice(); void onSubmit(notice.retry!); }}
                 disabled={busy}
-                className="shrink-0 text-xs font-medium underline underline-offset-2 disabled:opacity-40"
+                className="shrink-0 text-xs font-semibold underline underline-offset-2 disabled:opacity-40"
               >
                 Plan again
               </button>
@@ -282,38 +319,42 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
             <ul className="text-sm space-y-0.5 mb-2 list-disc pl-4">
               {proposalSummary.map((line, i) => <li key={i}>{line}</li>)}
             </ul>
-            <p className="text-xs text-subtle mb-2">Highlighted shapes change; everything else stays where it is.</p>
+            <p className="text-xs text-subtle mb-2.5">Highlighted shapes change; everything else stays where it is.</p>
             <div className="flex gap-2">
               <button
                 onClick={onApply}
-                disabled={phase === "applying"}
+                disabled={phase === "applying" || historyPreview}
                 className="btn-ink px-4 py-1.5 text-sm"
               >
                 Apply
               </button>
-              <button onClick={onCancel} className="btn-paper px-4 py-1.5 text-sm">
+              <button onClick={onCancel} disabled={phase === "applying"} className="btn-paper px-4 py-1.5 text-sm">
                 Cancel
               </button>
             </div>
           </div>
         )}
 
-        <div className="px-4 pt-2 pb-3">
-          {selectionLabels.length > 0 && (
-            <p data-testid="selection-chip" className="inline-block max-w-full text-xs font-semibold text-foreground bg-[#ffd84a] px-2 py-0.5 rounded-md mb-1.5 truncate" title={selectionLabels.join(", ")}>
-              Editing: {selectionLabels.join(", ")}
-            </p>
-          )}
-          <div className="flex gap-2 items-end">
+        {/* composer dock: selection, text and controls as one card */}
+        <div className="px-4 pt-1 pb-4">
+          <div className="sheet p-2.5 transition-shadow focus-within:shadow-[0_0_0_2px_var(--foreground),0_18px_40px_-22px_rgba(74,52,20,0.35)]">
+            {selectionLabels.length > 0 && (
+              <p data-testid="selection-chip" className="inline-block max-w-full text-xs font-semibold text-foreground bg-[#ffd84a] px-2 py-0.5 rounded-md mx-1 mt-0.5 mb-1 truncate" title={selectionLabels.join(", ")}>
+                Editing: {selectionLabels.join(", ")}
+              </p>
+            )}
             <textarea
               ref={inputRef}
               data-testid="composer"
               aria-label="Instruction"
               rows={3}
-              className="flex-1 resize-none text-sm bg-paper border-2 border-transparent rounded-xl px-3.5 py-2.5 text-foreground placeholder-placeholder shadow-[0_1px_0_rgba(26,23,20,0.06)] focus:outline-none focus:border-foreground transition-colors"
+              disabled={historyPreview}
+              className="block w-full resize-none bg-transparent px-2 py-1.5 text-[15px] leading-relaxed text-foreground placeholder-placeholder focus:outline-none"
               placeholder="Describe a change — e.g. “add a Redis cache between the API and Postgres”"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onCompositionStart={() => setComposing(true)}
+              onCompositionEnd={() => setComposing(false)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
@@ -321,18 +362,43 @@ const VoicePanel = forwardRef<VoicePanelHandle, VoicePanelProps>(
                 }
               }}
             />
-            <button
-              onClick={() => void send(draft)}
-              disabled={busy || !draft.trim()}
-              aria-label="Send instruction"
-              className="btn-ink w-11 h-11 shrink-0"
-            >
-              <IconSend size={18} />
-            </button>
+            <div className="flex items-center gap-2.5 pt-2 px-1">
+              <button
+                type="button"
+                role="switch"
+                disabled={historyPreview}
+                aria-checked={autoDraw}
+                aria-label="Auto draw after a pause"
+                title="Sends 1.8 s after text stops arriving. Additions and renames apply automatically; deletions still need your review. Keep this box focused while dictating."
+                onClick={() => onAutoDrawChange(!autoDraw)}
+                className="flex items-center gap-2 text-xs font-semibold text-muted hover:text-foreground shrink-0"
+              >
+                <span className={`relative inline-block w-8 h-[18px] rounded-full transition-colors ${autoDraw ? "bg-foreground" : "bg-surface-hover"}`}>
+                  <span className={`absolute top-[3px] left-0 w-3 h-3 rounded-full transition-transform ${autoDraw ? "translate-x-[17px] bg-accent" : "translate-x-[3px] bg-paper shadow-sm"}`} />
+                </span>
+                Auto draw
+              </button>
+              <span className="flex-1 min-w-0 text-[11px] text-placeholder truncate" aria-live="polite">
+                {historyPreview
+                  ? "History preview — return to current to edit"
+                  : phase === "planning"
+                  ? "Planning the change…"
+                  : isLoading
+                    ? "Drawing…"
+                    : autoDraw
+                      ? "Sends after a pause · deletions need review"
+                      : "Enter to send · Shift+Enter for a new line"}
+              </span>
+              <button
+                onClick={() => void send(draft)}
+                disabled={busy || !draft.trim()}
+                aria-label="Send instruction"
+                className="btn-ink w-10 h-10 shrink-0"
+              >
+                <IconSend size={17} />
+              </button>
+            </div>
           </div>
-          <p className="text-[11px] text-placeholder mt-1 h-4" aria-live="polite">
-            {phase === "planning" ? "Planning the change…" : isLoading ? "Drawing…" : "Enter to send · Shift+Enter for a new line"}
-          </p>
         </div>
       </div>
     );

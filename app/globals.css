@@ -329,6 +329,23 @@ body {
   }
   .ctl:hover, .ctl[aria-expanded="true"] { color: var(--foreground); box-shadow: 0 0 0 2px var(--foreground); }
 
+  /* square icon button (top bars) */
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    color: var(--text-subtle);
+    transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .icon-btn:hover, .icon-btn[aria-expanded="true"] {
+    background: var(--paper);
+    color: var(--foreground);
+    box-shadow: 0 1px 0 rgba(26, 23, 20, 0.06);
+  }
+
   /* segmented toggle: the active segment is solid ink */
   .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--paper); border-radius: 12px; box-shadow: 0 1px 0 rgba(26, 23, 20, 0.06); }
   .seg > button { padding: 0.35rem; border-radius: 9px; color: var(--text-subtle); transition: background-color 0.12s ease, color 0.12s ease; }

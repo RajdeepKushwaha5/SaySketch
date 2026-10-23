@@ -35,7 +35,7 @@ export default function InlineName({ value, onCommit }: Props) {
     return (
       <input
         ref={inputRef}
-        className="bg-background text-foreground text-sm font-medium px-2 py-0.5 rounded border border-border focus:outline-none focus:border-primary w-48"
+        className="font-display bg-paper text-foreground text-[16px] font-bold tracking-tight px-2 py-0.5 rounded-lg border-2 border-foreground focus:outline-none w-64"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
@@ -46,7 +46,7 @@ export default function InlineName({ value, onCommit }: Props) {
 
   return (
     <button
-      className="text-sm font-medium text-foreground hover:text-subtle truncate max-w-48"
+      className="font-display text-[16px] font-bold tracking-tight text-foreground hover:text-muted truncate max-w-72 px-2 py-0.5 -mx-2 rounded-lg hover:bg-paper/70 transition-colors"
       onClick={() => setEditing(true)}
       title="Click to rename"
     >

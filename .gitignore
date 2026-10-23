@@ -106,11 +106,14 @@ excalidraw-mcp/
 !README.md
 !PROJECT-PLAN.md
 !BUILD-CHECKLIST.md
+!RELEASE-CHECK.md
 
 # playwright
 /test-results/
 /playwright-report/
 /.next-e2e/
+/.next-audit/
+/.next-audit-e2e/
 
 # internal planning notes (kept local)
 /PROJECT-PLAN.md

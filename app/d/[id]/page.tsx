@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect, useMemo, use } from "react";
+import { useRef, useState, useEffect, useEffectEvent, useMemo, use } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -12,10 +12,10 @@ import VoicePanel, { type VoicePanelHandle } from "@/components/editor/VoicePane
 import EditorTopBar from "@/components/editor/EditorTopBar";
 import { type EditorMenuHandle } from "@/components/editor/EditorMenu";
 import { useAutoSave } from "@/hooks/editor/useAutoSave";
-import { useVersionHistory } from "@/hooks/editor/useVersionHistory";
 import { useAIGeneration } from "@/hooks/editor/useAIGeneration";
 import { useDiagramCommands } from "@/hooks/editor/useDiagramCommands";
 import { buildPlannerContext } from "@/lib/ai/plan";
+import { EXAMPLE_NAME, EXAMPLE_TRY } from "@/lib/example";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import type { Diagram } from "@/types/library";
 import { useUserSettings } from "@/hooks/useUserSettings";
@@ -31,6 +31,7 @@ export default function EditorPage({ params }: Props) {
   const { id } = use(params);
   const router = useRouter();
   const canvasRef = useRef<ExcalidrawCanvasHandle>(null);
+  const canvasReadyRef = useRef(false);
   const voicePanelRef = useRef<VoicePanelHandle>(null);
   const menuRef = useRef<EditorMenuHandle>(null);
   const [restoreFlash, setRestoreFlash] = useState(false);
@@ -46,10 +47,20 @@ export default function EditorPage({ params }: Props) {
   }, [id, diagram?.id]);
 
   const { triggerSave, forceSave, saveVersion, saveStatus, pauseSave, resumeSave } = useAutoSave(id, canvasRef);
-  const { restoreVersion } = useVersionHistory(id);
   const { loadingPhase, isLoading, errorMessage, showError, handleMicStart, handleMicStop, handleSilence } =
     useAIGeneration({ id, diagram, canvasRef, settings });
   const commands = useDiagramCommands({ id, diagram, canvasRef, settings });
+  const [autoDraw, setAutoDraw] = useState(false);
+  const autoAttemptedRef = useRef<object | null>(null);
+  const applyAutomatically = useEffectEvent(() => {
+    const proposal = commands.proposal;
+    if (!proposal?.autoApplicable || autoAttemptedRef.current === proposal) return;
+    autoAttemptedRef.current = proposal;
+    void commands.apply();
+  });
+  useEffect(() => {
+    if (autoDraw && commands.proposal) applyAutomatically();
+  }, [autoDraw, commands.proposal]);
   const [selection, setSelection] = useState<string[]>([]);
 
   // Labels for the "Editing: …" chip, resolved from the live scene.
@@ -65,13 +76,30 @@ export default function EditorPage({ params }: Props) {
     });
   }, [selection]);
 
+  // /d/new?example=1 lands here with an empty canvas; fill it from the static example route once.
+  const exampleLoadingRef = useRef(false);
+  async function handleCanvasReady() {
+    canvasReadyRef.current = true;
+    const canvas = canvasRef.current;
+    if (!canvas || exampleLoadingRef.current) return;
+    if (new URLSearchParams(window.location.search).get("example") !== "1") return;
+    exampleLoadingRef.current = true;
+    router.replace(`/d/${id}`);
+    if (canvas.getElements().length > 0) return;
+    try {
+      const res = await fetch("/api/example");
+      const example = await res.json();
+      canvasRef.current?.updateDiagram(example.elements, { replace: true, files: example.files });
+      await db.diagrams.update(id, { graph: example.graph, updatedAt: Date.now() });
+    } catch {
+      showError("couldn't load the example — try again");
+    }
+  }
+
   // Full generation replaces the canvas, so it only runs on an empty one; everything else is a reviewed patch.
   async function submitInstruction(text: string): Promise<boolean> {
     const live = canvasRef.current?.getElements() ?? [];
-    if (live.length === 0) {
-      await handleSilence(text);
-      return true;
-    }
+    if (live.length === 0) return handleSilence(text);
     return commands.propose(text);
   }
 
@@ -85,7 +113,7 @@ export default function EditorPage({ params }: Props) {
   }
 
   useKeyboardShortcuts({
-    "mod+s": () => forceSave(canvasRef.current?.getElements() ?? []),
+    "mod+s": () => { if (canvasReadyRef.current) void forceSave(canvasRef.current?.getElements() ?? []); },
     "mod+k": () => voicePanelRef.current?.focusInput(),
     "mod+e": () => menuRef.current?.toggle(),
     "mod+shift+l": () => handleToggleLock(),
@@ -131,7 +159,12 @@ export default function EditorPage({ params }: Props) {
       <EditorTopBar
         diagram={diagram!}
         saveStatus={saveStatus}
-        onBack={() => router.push("/library")}
+        onBack={async () => {
+          if (!canvasReadyRef.current) { router.push("/library"); return; }
+          const saved = await forceSave(canvasRef.current?.getElements() ?? diagram.elements);
+          if (saved) router.push("/library");
+          else showError("couldn't save — stay here and export a backup before leaving");
+        }}
         onRename={(name) => db.diagrams.update(id, { name, updatedAt: Date.now() })}
         onStar={(starred) => db.diagrams.update(id, { starred })}
         onDuplicate={handleDuplicate}
@@ -172,7 +205,10 @@ export default function EditorPage({ params }: Props) {
             isLoading={isLoading}
             onSilence={(text) => void submitInstruction(text)}
             onSubmit={submitInstruction}
+            autoDraw={autoDraw}
+            onAutoDrawChange={setAutoDraw}
             selectionLabels={selectionLabels}
+            examples={diagram.name === EXAMPLE_NAME ? EXAMPLE_TRY.map((prompt) => ({ label: prompt, prompt })) : undefined}
             phase={commands.phase}
             proposalSummary={commands.proposal?.candidate.summary ?? null}
             notice={commands.notice}
@@ -204,6 +240,7 @@ export default function EditorPage({ params }: Props) {
               initialFiles={diagram!.files ?? {}}
               onChange={(elements) => triggerSave(elements)}
               onSelectionChange={setSelection}
+              onReady={() => void handleCanvasReady()}
             />
             {(loadingPhase !== "idle" || commands.phase === "planning") && (
               <div className="absolute bottom-3 right-3 w-2 h-2 rounded-full bg-zinc-400 animate-pulse pointer-events-none" />

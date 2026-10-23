@@ -1,6 +1,7 @@
 // Guards for model-funded routes: kill switch, body size and a per-client rate limit.
-// The limiter is process-local, which is enough for a protected single-instance preview only.
-// A public multi-instance deployment needs a shared store (PROJECT-PLAN §3.1 / W11).
+// With UPSTASH_REDIS_REST_URL/TOKEN set, the limit is shared across serverless instances (public deploys).
+// Without shared configuration, a process-local limiter applies to local/protected previews only.
+// When shared limiting is configured, an outage must block funded calls rather than weaken protection.
 
 const WINDOW_MS = 60_000;
 export const MAX_BODY_BYTES = 64 * 1024;
@@ -32,20 +33,69 @@ export function resetRateLimits() {
   hits.clear();
 }
 
+/**
+ * Fixed one-minute window counted in Upstash Redis via its REST pipeline.
+ * Returns seconds to wait when limited, null when allowed, undefined when not configured or unavailable.
+ */
+export async function checkSharedRateLimit(key: string, now = Date.now(), limit = limitPerMinute()): Promise<number | null | undefined> {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return undefined;
+  const window = Math.floor(now / WINDOW_MS);
+  const redisKey = `saysketch:rl:${key}:${window}`;
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/pipeline`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify([["INCR", redisKey], ["EXPIRE", redisKey, String(Math.ceil(WINDOW_MS / 1000) + 5)]]),
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return undefined;
+    const [incr, expiry] = (await res.json()) as { result?: unknown }[];
+    const count = Number(incr?.result);
+    if (!Number.isInteger(count) || count < 1 || expiry?.result !== 1) return undefined;
+    return count > limit ? Math.ceil(((window + 1) * WINDOW_MS - now) / 1000) : null;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Returns an error response when the request must not reach a model provider, else the parsed JSON body. */
 export async function guardAIRequest(request: Request): Promise<{ error: Response } | { body: unknown }> {
   if (process.env.AI_DISABLED === "1") {
     return { error: Response.json({ error: "AI editing is switched off right now. Manual editing and export still work." }, { status: 503 }) };
   }
-  const retryAfter = checkRateLimit(clientKey(request));
+  const key = clientKey(request);
+  const shared = await checkSharedRateLimit(key);
+  if (shared === undefined && (process.env.UPSTASH_REDIS_REST_URL || process.env.UPSTASH_REDIS_REST_TOKEN)) {
+    return { error: Response.json({ error: "AI is temporarily unavailable. Your diagram is unchanged; please try again later." }, { status: 503 }) };
+  }
+  const retryAfter = shared === undefined ? checkRateLimit(key) : shared;
   if (retryAfter !== null) {
     return { error: Response.json({ error: `Too many requests. Try again in ${retryAfter}s.` }, { status: 429, headers: { "Retry-After": String(retryAfter) } }) };
   }
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return { error: Response.json({ error: "Request is too large." }, { status: 413 }) };
+  const reader = request.body?.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
   try {
+    if (reader) {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+        if (bytes > MAX_BODY_BYTES) {
+          await reader.cancel();
+          return { error: Response.json({ error: "Request is too large." }, { status: 413 }) };
+        }
+        text += decoder.decode(chunk.value, { stream: true });
+      }
+      text += decoder.decode();
+    }
     return { body: JSON.parse(text) };
   } catch {
     return { error: Response.json({ error: "Request body must be valid JSON." }, { status: 400 }) };
+  } finally {
+    reader?.releaseLock();
   }
 }

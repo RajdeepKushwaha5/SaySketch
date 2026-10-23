@@ -1,16 +1,11 @@
 import { db } from "@/lib/db";
 import { createDiagram } from "@/lib/diagram";
 import type { DiagramType } from "@/types/library";
-import type { ExcalidrawElement } from "@/types/diagram";
+import { readBackup } from "./validate";
 
 export async function importExcalidrawFile(file: File): Promise<string> {
-  const text = await file.text();
-  const parsed = JSON.parse(text);
-
-  const elements: ExcalidrawElement[] = Array.isArray(parsed.elements)
-    ? parsed.elements
-    : [];
-  const files = parsed.files && typeof parsed.files === "object" ? parsed.files : {};
+  const parsed = await readBackup(file);
+  const { elements, files } = parsed;
   const name = file.name.replace(/\.excalidraw$/i, "") || "Imported Diagram";
 
   const diagram = createDiagram({ name, elements, files, generatedVia: "import" });
@@ -19,12 +14,8 @@ export async function importExcalidrawFile(file: File): Promise<string> {
 }
 
 export async function importYapDrawJSON(file: File): Promise<string> {
-  const text = await file.text();
-  const parsed = JSON.parse(text);
-
-  const elements: ExcalidrawElement[] = Array.isArray(parsed.elements)
-    ? parsed.elements
-    : [];
+  const parsed = await readBackup(file);
+  const { elements, files } = parsed;
   const name: string =
     typeof parsed.name === "string" && parsed.name.trim()
       ? parsed.name.trim()
@@ -35,19 +26,21 @@ export async function importYapDrawJSON(file: File): Promise<string> {
     "system-architecture",
     "operations-flowchart",
   ];
-  const diagramType: DiagramType = validTypes.includes(parsed.diagramType)
-    ? parsed.diagramType
+  const diagramType: DiagramType = validTypes.includes(parsed.diagramType as DiagramType)
+    ? parsed.diagramType as DiagramType
     : "freeform";
 
   const transcript =
     typeof parsed.transcript === "string" ? parsed.transcript : "";
-  const colorPalette = Array.isArray(parsed.metadata?.colorPalette)
-    ? parsed.metadata.colorPalette
+  const metadata = parsed.metadata as { colorPalette?: unknown } | undefined;
+  const colorPalette = Array.isArray(metadata?.colorPalette)
+    ? metadata.colorPalette.filter((color): color is string => typeof color === "string")
     : [];
 
   const diagram = createDiagram({
     name,
     elements,
+    files,
     transcript,
     diagramType,
     generatedVia: "import",

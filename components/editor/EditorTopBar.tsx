@@ -1,6 +1,6 @@
 'use client'
 
-import { IconArrowLeft, IconStar, IconStarFilled, IconLock, IconBookmark, IconSettings } from '@tabler/icons-react'
+import { IconArrowLeft, IconStar, IconStarFilled, IconLock, IconBookmark, IconSettings, IconKeyboard } from '@tabler/icons-react'
 import type { Diagram } from '@/types/library'
 import type { SaveStatus } from '@/hooks/editor/useAutoSave'
 import type { ExcalidrawCanvasHandle } from '@/components/editor/ExcalidrawCanvas'
@@ -38,36 +38,39 @@ export default function EditorTopBar({
   menuRef,
 }: Props) {
   return (
-    <header className="flex items-center gap-3 h-14 px-4 bg-background shrink-0">
+    <header className="flex items-center gap-2 h-16 px-4 bg-background shrink-0">
+      {/* breadcrumb: mark → Library / diagram name */}
       <button
         onClick={onBack}
-        className="flex items-center gap-1 text-subtle hover:text-foreground transition-colors"
+        className="group flex items-center gap-2.5 rounded-xl pr-2 text-subtle hover:text-foreground transition-colors"
         aria-label="Back to library"
       >
-        <IconArrowLeft size={18} />
-        <span className="text-sm hidden sm:inline">Library</span>
+        <span className="w-8 h-8 rounded-lg bg-foreground flex items-center justify-center shadow-[2px_2px_0_var(--accent)] transition-transform group-hover:-translate-x-0.5">
+          <IconArrowLeft size={16} className="text-paper" />
+        </span>
+        <span className="text-sm font-medium hidden sm:inline">Library</span>
       </button>
 
-      <div className="w-1 h-1 rounded-full bg-placeholder" />
+      <span className="text-placeholder text-lg font-light select-none" aria-hidden="true">/</span>
 
       <InlineName value={diagram.name} onCommit={name => onRename?.(name)} />
 
       <button
         onClick={() => onStar?.(!diagram.starred)}
-        className="text-placeholder hover:text-[#F59E0B] transition-colors ml-1"
+        className="icon-btn !w-8 !h-8"
         aria-label={diagram.starred ? 'Unstar diagram' : 'Star diagram'}
       >
         {diagram.starred
-          ? <IconStarFilled size={16} className="text-[#F59E0B]" />
+          ? <IconStarFilled size={16} className="text-[#e0a400]" />
           : <IconStar size={16} />
         }
       </button>
 
       {diagram.locked && (
-        <div className="flex items-center gap-1 px-2 py-0.5 bg-[#FEF3C7] border border-[#F59E0B]/40 rounded text-[#D97706]">
+        <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-warning-light text-warning text-xs font-semibold">
           <IconLock size={12} />
-          <span className="text-xs font-medium">Locked</span>
-        </div>
+          Locked
+        </span>
       )}
 
       <div className="flex-1" />
@@ -77,43 +80,37 @@ export default function EditorTopBar({
       {onSaveVersion && (
         <button
           onClick={onSaveVersion}
-          className="flex items-center gap-1.5 text-xs text-subtle hover:text-foreground hover:bg-surface px-2 py-1 rounded transition-colors"
+          className="ctl h-9 px-3 text-[13px] font-medium"
           aria-label="Save version checkpoint"
         >
-          <IconBookmark size={14} />
+          <IconBookmark size={15} />
           <span className="hidden sm:inline">Save version</span>
         </button>
       )}
 
-      {onOpenShortcuts && (
-        <button
-          onClick={onOpenShortcuts}
-          className="flex items-center gap-1.5 text-xs text-subtle hover:text-foreground hover:bg-surface px-2 py-1 rounded transition-colors"
-          aria-label="Keyboard shortcuts"
-        >
-          <span className="text-sm font-medium">?</span>
-        </button>
-      )}
+      <div className="flex items-center gap-0.5 ml-1">
+        {onOpenShortcuts && (
+          <button onClick={onOpenShortcuts} className="icon-btn" aria-label="Keyboard shortcuts">
+            <IconKeyboard size={18} />
+          </button>
+        )}
 
-      {onOpenSettings && (
-        <button
-          onClick={onOpenSettings}
-          className="flex items-center gap-1.5 text-xs text-subtle hover:text-foreground hover:bg-surface px-2 py-1 rounded transition-colors"
-          aria-label="Open settings"
-        >
-          <IconSettings size={18} />
-        </button>
-      )}
+        {onOpenSettings && (
+          <button onClick={onOpenSettings} className="icon-btn" aria-label="Open settings">
+            <IconSettings size={18} />
+          </button>
+        )}
 
-      {canvasRef && onDuplicate && onToggleLock && (
-        <EditorMenu
-          ref={menuRef}
-          diagram={diagram}
-          canvasRef={canvasRef}
-          onDuplicate={onDuplicate}
-          onToggleLock={onToggleLock}
-        />
-      )}
+        {canvasRef && onDuplicate && onToggleLock && (
+          <EditorMenu
+            ref={menuRef}
+            diagram={diagram}
+            canvasRef={canvasRef}
+            onDuplicate={onDuplicate}
+            onToggleLock={onToggleLock}
+          />
+        )}
+      </div>
     </header>
   )
 }

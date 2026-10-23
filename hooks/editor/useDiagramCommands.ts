@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { encodeAIMeta } from "@/lib/versionMeta";
 import { buildPlannerContext, type PlanResult } from "@/lib/ai/plan";
 import { buildPatch, sceneSnapshot, type PatchCandidate } from "@/lib/scene/patch";
+import { canAutoApply } from "@/lib/scene/auto-draw";
 import type { ExcalidrawCanvasHandle } from "@/components/editor/ExcalidrawCanvas";
 import type { Diagram } from "@/types/library";
 import type { UserSettings } from "@/hooks/useUserSettings";
@@ -23,6 +24,7 @@ export interface Proposal {
   instruction: string;
   candidate: PatchCandidate;
   baseSnapshot: string;
+  autoApplicable: boolean;
 }
 
 interface Options {
@@ -74,6 +76,7 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),
       });
       const data = (await res.json().catch(() => ({}))) as PlanResult & { error?: string };
+      if (controller.signal.aborted || abortRef.current !== controller) return false;
       if (!res.ok || data.error) {
         setNotice({ kind: "error", text: data.error ?? "Planning failed. Your diagram is unchanged.", retry: instruction });
         return false;
@@ -99,7 +102,7 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         setNotice({ kind: "error", text: err instanceof Error ? err.message : "That change could not be applied.", retry: instruction });
         return false;
       }
-      setProposal({ instruction, candidate, baseSnapshot });
+      setProposal({ instruction, candidate, baseSnapshot, autoApplicable: canAutoApply(data.operations) });
       setPhase("preview");
       // Highlight what will change: existing shapes/arrows only (new ones appear on apply).
       const existing = new Map(current.map(el => [el.id, el]));
@@ -111,13 +114,17 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
       setNotice({ kind: "error", text: timedOut ? "Planning took too long. Your diagram is unchanged." : "Could not reach the planner. Your diagram is unchanged.", retry: instruction });
       return false;
     } finally {
-      setPhase(p => (p === "planning" ? "idle" : p));
+      if (abortRef.current === controller) setPhase(p => (p === "planning" ? "idle" : p));
     }
   }
 
   async function apply() {
     const canvas = canvasRef.current;
     if (!canvas || !proposal || applyingRef.current) return;
+    if (diagram?.locked) {
+      setNotice({ kind: "error", text: "This diagram is locked. Unlock it before applying changes." });
+      return;
+    }
     applyingRef.current = true;
     setPhase("applying");
     try {
@@ -129,10 +136,11 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         return;
       }
       const latest = await db.diagrams.get(id);
+      const checkpointId = nanoid();
       try {
         // Complete pre-change checkpoint (elements + files) so the change can be restored after reload.
         await db.versions.add({
-          id: nanoid(),
+          id: checkpointId,
           diagramId: id,
           version: latest?.version ?? 0,
           elements: current,
@@ -146,6 +154,15 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
         setNotice({ kind: "error", text: "Could not save a checkpoint, so nothing was applied. Export a backup and try again." });
         return;
       }
+      // The awaits above yield to the browser; a drag in that gap must not be overwritten.
+      // No await between this check and applyPatch, so nothing can change in between.
+      if (sceneSnapshot(canvas.getElements()) !== proposal.baseSnapshot) {
+        await db.versions.delete(checkpointId).catch(() => {});
+        setNotice({ kind: "conflict", text: "You edited the diagram while this was being applied. Nothing was applied.", retry: proposal.instruction });
+        canvas.select([]);
+        setProposal(null);
+        return;
+      }
       canvas.applyPatch(proposal.candidate.elements, proposal.candidate.affectedIds);
       canvas.select([]);
       setProposal(null);
@@ -157,6 +174,9 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
           metadata: { ...latest.metadata, generatedVia: "voice" },
         }).catch(err => console.error("transcript update failed", err));
       }
+    } catch (err) {
+      console.error("command apply failed", err);
+      setNotice({ kind: "error", text: "Could not finish applying. Check the canvas and saved history before retrying." });
     } finally {
       applyingRef.current = false;
       setPhase("idle");
@@ -164,7 +184,10 @@ export function useDiagramCommands({ id, diagram, canvasRef, settings }: Options
   }
 
   function cancel() {
+    // Once Apply starts, let its short checkpoint/render section finish as a single action.
+    if (applyingRef.current) return;
     abortRef.current?.abort();
+    abortRef.current = null;
     if (proposal) canvasRef.current?.select([]);
     setProposal(null);
     setPhase("idle");

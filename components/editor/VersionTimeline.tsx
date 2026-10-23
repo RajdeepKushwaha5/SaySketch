@@ -10,8 +10,6 @@ import {
 } from "react";
 import {
   IconArrowBackUp,
-  IconClock,
-  IconChevronRight,
   IconX,
 } from "@tabler/icons-react";
 import { useVersionHistory } from "@/hooks/editor/useVersionHistory";
@@ -32,6 +30,8 @@ interface Props {
   onRestoreAnimation: () => void;
   pauseSave: (liveElements: ExcalidrawElement[]) => void;
   resumeSave: () => void;
+  disabled?: boolean;
+  onPreviewChange?: (viewing: boolean) => void;
 }
 
 function versionLabel(v: DiagramVersion): string | null {
@@ -43,13 +43,14 @@ function versionLabel(v: DiagramVersion): string | null {
 
 const VersionTimeline = forwardRef<VersionTimelineHandle, Props>(
   function VersionTimeline(
-    { diagramId, canvasRef, onRestoreAnimation, pauseSave, resumeSave },
+    { diagramId, canvasRef, onRestoreAnimation, pauseSave, resumeSave, disabled, onPreviewChange },
     ref,
   ) {
     const { versions, restoreVersion } = useVersionHistory(diagramId);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [isViewing, setIsViewing] = useState(false);
     const liveSnapshotRef = useRef<ExcalidrawElement[] | null>(null);
+    useEffect(() => { onPreviewChange?.(isViewing); }, [isViewing, onPreviewChange]);
 
     const [, setTick] = useState(0);
     useEffect(() => {
@@ -65,6 +66,7 @@ const VersionTimeline = forwardRef<VersionTimelineHandle, Props>(
         });
       }
       resumeSave();
+      canvasRef.current?.setReadOnly(false);
       setSelectedId(null);
       setIsViewing(false);
       liveSnapshotRef.current = null;
@@ -72,6 +74,7 @@ const VersionTimeline = forwardRef<VersionTimelineHandle, Props>(
 
     const handleSelect = useCallback(
       (v: DiagramVersion) => {
+        if (disabled) return;
         if (selectedId === v.id) {
           handleCancelView();
           return;
@@ -83,12 +86,13 @@ const VersionTimeline = forwardRef<VersionTimelineHandle, Props>(
         }
         setSelectedId(v.id);
         setIsViewing(true);
+        canvasRef.current?.setReadOnly(true);
         canvasRef.current?.updateDiagram(v.elements as ExcalidrawElement[], {
           replace: true,
           files: Object.values(v.files ?? {}),
         });
       },
-      [selectedId, isViewing, canvasRef, pauseSave, handleCancelView],
+      [selectedId, isViewing, canvasRef, pauseSave, handleCancelView, disabled],
     );
 
     const handleRevert = async (versionId: string) => {
@@ -102,6 +106,7 @@ const VersionTimeline = forwardRef<VersionTimelineHandle, Props>(
       }
       resumeSave();
       await restoreVersion(versionId);
+      canvasRef.current?.setReadOnly(false);
       onRestoreAnimation();
       setSelectedId(null);
       setIsViewing(false);
@@ -148,145 +153,102 @@ const VersionTimeline = forwardRef<VersionTimelineHandle, Props>(
 
     if (versions.length === 0) {
       return (
-        <div className="px-4 py-3 border-b border-border-subtle">
-          <div className="flex items-center gap-1.5 mb-2">
-            <IconClock size={12} className="text-placeholder" />
-            <span className="text-[11px] font-semibold text-foreground">
-              Versions
-            </span>
-          </div>
-          <p className="text-[11px] text-placeholder">
-            Versions appear here as you work.
-          </p>
+        <div className="px-5 pt-4 pb-1 flex items-center gap-2">
+          <span className="section-label">History</span>
+          <span className="text-[12px] text-placeholder">appears as you edit</span>
         </div>
       );
     }
 
     return (
-      <div className="border-b border-border-subtle">
-        <div className="px-4 pt-3 pb-1 flex items-center justify-between">
+      <div>
+        <div className="px-5 pt-4 pb-1.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <IconClock size={12} className="text-placeholder" />
-            <span className="text-[11px] font-semibold text-foreground">
-              Versions
-            </span>
-            <span className="text-[10px] text-placeholder bg-surface px-1.5 py-0.5 rounded-full tabular-nums">
+            <span className="section-label">History</span>
+            <span className="text-[11px] font-semibold text-muted bg-surface px-1.5 rounded-full tabular-nums">
               {versions.length}
             </span>
           </div>
           {isViewing && (
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
-              <span className="text-[10px] font-medium text-violet-600">
-                Previewing
-              </span>
-            </div>
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              Previewing
+            </span>
           )}
         </div>
 
+        {/* newest first; the current version is solid ink, the previewed one is highlighted */}
         <div
-          className="flex items-center overflow-x-auto px-4 py-2.5 hide-scrollbar"
+          className="flex items-center gap-1.5 overflow-x-auto px-5 pb-2 pt-0.5 hide-scrollbar"
           style={{ scrollbarWidth: "none" }}
         >
           {versions.map((v, i, arr) => {
             const displayNum = arr.length - i;
             const isSelected = v.id === selectedId;
             const isCurrent = i === 0;
-
             return (
-              <div key={v.id} className="flex items-center shrink-0">
-                {i > 0 && (
-                  <IconChevronRight
-                    size={12}
-                    className="text-[#CBD5E1] mx-0.5 shrink-0 self-start mt-[6px]"
-                  />
-                )}
-
-                <button
-                  onClick={() => handleSelect(v)}
-                  className={`relative flex flex-col items-center group transition-all ${
-                    isSelected ? "scale-110" : "hover:scale-105"
-                  }`}
-                  title={`v${displayNum} · ${relativeTime(v.savedAt)} · ${v.elements.length} elements`}
-                >
-                  <div
-                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
-                      isSelected
-                        ? "border-violet-400 bg-violet-100"
-                        : isCurrent
-                          ? "border-emerald-400 bg-emerald-50"
-                          : "border-border bg-white group-hover:border-placeholder group-hover:bg-background"
-                    }`}
-                  >
-                    <span
-                      className={`text-[8px] font-bold ${
-                        isSelected
-                          ? "text-violet-700"
-                          : isCurrent
-                            ? "text-emerald-700"
-                            : "text-placeholder group-hover:text-subtle"
-                      }`}
-                    >
-                      {displayNum}
-                    </span>
-                  </div>
-                  <span
-                    className={`text-[8px] mt-1 whitespace-nowrap tabular-nums ${
-                      isSelected ? "text-violet-500" : "text-[#CBD5E1]"
-                    }`}
-                  >
-                    {relativeTime(v.savedAt)}
-                  </span>
-                </button>
-              </div>
+              <button
+                key={v.id}
+                disabled={disabled}
+                onClick={() => handleSelect(v)}
+                title={`Version ${displayNum} \u00b7 ${relativeTime(v.savedAt)} \u00b7 ${v.elements.length} elements${versionLabel(v) ? ` \u00b7 ${versionLabel(v)}` : ""}`}
+                className={`shrink-0 h-7 px-2.5 rounded-lg text-[12px] font-semibold tabular-nums transition-all ${
+                  isSelected
+                    ? "bg-[#ffd84a] text-foreground shadow-[0_0_0_2px_var(--foreground)]"
+                    : isCurrent
+                      ? "bg-foreground text-paper"
+                      : "bg-paper text-muted hover:text-foreground shadow-[0_1px_0_rgba(26,23,20,0.06)] hover:-translate-y-px"
+                }`}
+              >
+                v{displayNum}
+                {isCurrent && !isSelected && <span className="ml-1.5 font-normal opacity-70">now</span>}
+              </button>
             );
           })}
         </div>
 
         {selectedVersion && (
-          <div className="mx-4 mb-3 rounded-lg border border-border-subtle bg-background overflow-hidden">
-            <div className="px-3 py-2.5 flex items-start justify-between gap-2">
+          <div className="mx-4 mb-2 mt-1 rounded-xl bg-paper p-3 shadow-[0_10px_24px_-16px_rgba(74,52,20,0.5)]">
+            <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] font-semibold text-foreground">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display text-[15px] font-bold text-foreground">
                     Version {selectedDisplayNum}
                   </span>
-                  <span className="text-[10px] text-placeholder">
-                    {relativeTime(selectedVersion.savedAt)}
-                  </span>
-                  <span className="text-[10px] text-[#CBD5E1]">
-                    {selectedVersion.elements.length} els
+                  <span className="text-[11px] text-placeholder">
+                    {relativeTime(selectedVersion.savedAt)} \u00b7 {selectedVersion.elements.length} elements
                   </span>
                 </div>
                 {versionLabel(selectedVersion) && (
-                  <p className="text-[11px] text-subtle line-clamp-2 italic">
-                    {'"'}
+                  <p className="text-[12px] text-subtle line-clamp-2 mt-0.5">
+                    {'\u201c'}
                     {versionLabel(selectedVersion)}
-                    {'"'}
+                    {'\u201d'}
                   </p>
                 )}
               </div>
               <button
                 onClick={handleCancelView}
-                className="p-1 text-[#CBD5E1] hover:text-subtle transition-colors rounded"
+                className="p-1 text-placeholder hover:text-foreground transition-colors rounded"
                 title="Close preview"
+                aria-label="Close preview"
               >
-                <IconX size={12} />
+                <IconX size={14} />
               </button>
             </div>
-            <div className="px-3 pb-2.5 flex items-center gap-2 border-t border-border-subtle pt-2">
+            <div className="flex items-center gap-2 mt-2.5">
               <button
                 onClick={() => handleRevert(selectedVersion.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-medium bg-primary hover:bg-primary-hover text-white transition-colors"
+                className="btn-ink px-3 py-1.5 text-[12px]"
               >
-                <IconArrowBackUp size={12} />
-                Restore this version
+                <IconArrowBackUp size={13} />
+                Restore
               </button>
               <button
                 onClick={handleCancelView}
-                className="px-3 py-1.5 rounded-md text-[11px] text-subtle hover:bg-[#E2E8F0] transition-colors"
+                className="btn-paper px-3 py-1.5 text-[12px]"
               >
-                Cancel
+                Back to current
               </button>
             </div>
           </div>

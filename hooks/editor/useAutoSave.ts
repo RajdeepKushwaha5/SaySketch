@@ -25,18 +25,21 @@ export function useAutoSave(
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastVersionTimeRef = useRef<number>(Date.now());
   const saveCountRef = useRef(0);
-  const saveRef = useRef<(elements: ExcalidrawElement[]) => Promise<void>>(() =>
-    Promise.resolve(),
+  const saveRef = useRef<(elements: ExcalidrawElement[]) => Promise<boolean>>(() =>
+    Promise.resolve(false),
   );
   const pausedRef = useRef(false);
   const liveElementsRef = useRef<ExcalidrawElement[] | null>(null);
+  // Saves run one at a time; each carries a sequence number so a stale one never writes over newer content.
+  const seqRef = useRef(0);
+  const chainRef = useRef<Promise<boolean>>(Promise.resolve(false));
 
   const save = useCallback(
-    async (elements: ExcalidrawElement[]) => {
+    async (elements: ExcalidrawElement[], seq: number) => {
       setSaveStatus("saving");
       try {
         const diagram = await db.diagrams.get(diagramId);
-        if (!diagram) return;
+        if (!diagram) return false;
 
         const now = Date.now();
         const newVersion = diagram.version + 1;
@@ -70,6 +73,9 @@ export function useAutoSave(
 
         const files = canvasRef.current?.getFiles?.() ?? {};
 
+        // A newer save is queued behind this one; let it write the latest content instead.
+        if (seq !== seqRef.current) return false;
+
         await db.diagrams.update(diagramId, {
           elements,
           files,
@@ -101,6 +107,7 @@ export function useAutoSave(
         }
 
         setSaveStatus("saved");
+        return true;
       } catch (err) {
         if (err instanceof DOMException && err.name === "QuotaExceededError") {
           setSaveStatus("quota");
@@ -108,12 +115,22 @@ export function useAutoSave(
           console.error("Auto-save failed:", err);
           setSaveStatus("error");
         }
+        return false;
       }
     },
     [diagramId, canvasRef],
   );
 
-  saveRef.current = save;
+  const enqueue = useCallback(
+    (elements: ExcalidrawElement[]) => {
+      const seq = ++seqRef.current;
+      chainRef.current = chainRef.current.then(() => save(elements, seq)).catch(() => false);
+      return chainRef.current;
+    },
+    [save],
+  );
+
+  saveRef.current = enqueue;
 
   const pauseSave = useCallback((liveElements: ExcalidrawElement[]) => {
     pausedRef.current = true;
@@ -132,19 +149,22 @@ export function useAutoSave(
   const triggerSave = useCallback(
     (elements: ExcalidrawElement[]) => {
       if (pausedRef.current) return;
+      setSaveStatus("saving");
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => save(elements), SAVE_DEBOUNCE_MS);
+      saveTimerRef.current = setTimeout(() => void enqueue(elements), SAVE_DEBOUNCE_MS);
     },
-    [save],
+    [enqueue],
   );
 
   const forceSave = useCallback(
     async (elements: ExcalidrawElement[]) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveCountRef.current = VERSION_SNAPSHOT_EVERY_N - 1;
-      await save(elements);
+      // A history preview is temporary; save the pre-preview live scene when leaving it.
+      const live = pausedRef.current ? liveElementsRef.current : elements;
+      return live ? enqueue(live) : false;
     },
-    [save],
+    [enqueue],
   );
 
   const saveVersion = useCallback(async () => {

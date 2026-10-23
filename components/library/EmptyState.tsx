@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 import {
   IconBooks,
   IconFolder,
@@ -52,12 +54,17 @@ export default function EmptyState({ variant, onCreateDiagram }: Props) {
       <p className="text-muted font-medium text-base">{title}</p>
       <p className="text-placeholder text-sm max-w-xs">{subtitle}</p>
       {variant === 'empty-library' && onCreateDiagram && (
-        <button
-          onClick={onCreateDiagram}
-          className="btn-ink mt-3 px-5 py-2.5 text-sm"
-        >
-          New Diagram
-        </button>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={onCreateDiagram}
+            className="btn-ink px-5 py-2.5 text-sm"
+          >
+            New Diagram
+          </button>
+          <Link href="/d/new?example=1" className="btn-paper px-5 py-2.5 text-sm">
+            Open example diagram
+          </Link>
+        </div>
       )}
     </div>
   )

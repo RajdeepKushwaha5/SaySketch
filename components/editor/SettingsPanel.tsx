@@ -79,10 +79,10 @@ export default function SettingsPanel({ settings, onSave, onClose }: Props) {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder={placeholder}
-              className="w-full text-sm bg-background border border-border rounded-lg px-3 py-2 text-foreground placeholder-placeholder focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full text-sm bg-background border-2 border-transparent rounded-xl px-3 py-2 text-foreground placeholder-placeholder focus:outline-none focus:border-foreground transition-colors"
             />
-            <p className="text-xs text-placeholder">
-              Leave blank to use our free tier — Groq (Llama 3.3 70B)
+            <p className="text-xs text-placeholder leading-relaxed">
+              Optional. Leave blank to use the shared model. Your key stays in this tab only and is cleared when you close it.
             </p>
           </div>
         </div>

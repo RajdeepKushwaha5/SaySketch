@@ -31,6 +31,8 @@ export function exportAsJSON(diagram: Diagram): void {
     name: diagram.name,
     diagramType: diagram.diagramType,
     elements: diagram.elements,
+    // embedded images/icons; without them restored diagrams show broken images
+    files: diagram.files ?? {},
     transcript: diagram.transcript,
     metadata: diagram.metadata,
     createdAt: diagram.createdAt,
@@ -48,9 +50,14 @@ export async function exportBulkAsZip(
 ): Promise<void> {
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
+  const usedNames = new Set<string>();
 
   for (const diagram of diagrams) {
-    const safeName = diagram.name.replace(/[/\\?%*:|"<>]/g, "-");
+    const baseName = diagram.name.replace(/[/\\?%*:|"<>]/g, "-") || "Diagram";
+    let safeName = baseName;
+    let suffix = 2;
+    while (usedNames.has(safeName.toLowerCase())) safeName = `${baseName} (${suffix++})`;
+    usedNames.add(safeName.toLowerCase());
     if (format === "excalidraw") {
       const data = {
         type: "excalidraw",
@@ -67,6 +74,7 @@ export async function exportBulkAsZip(
         name: diagram.name,
         diagramType: diagram.diagramType,
         elements: diagram.elements,
+        files: diagram.files ?? {},
         transcript: diagram.transcript,
         metadata: diagram.metadata,
         createdAt: diagram.createdAt,

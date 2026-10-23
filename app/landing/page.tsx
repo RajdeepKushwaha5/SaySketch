@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { IconArrowRight, IconFolders, IconBrandGithub } from '@tabler/icons-react'
+import { IconArrowRight, IconSparkles, IconBrandGithub } from '@tabler/icons-react'
 import ArchitectureDemo from '@/components/landing/ArchitectureDemo'
 
 const REPO_URL = 'https://github.com/RajdeepKushwaha5/SaySketch'
@@ -51,9 +51,9 @@ export default function LandingPage() {
               Start drawing
               <IconArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
             </Link>
-            <Link href="/library" className="btn-paper px-6 py-3.5 text-[15px]">
-              Open library
-              <IconFolders className="w-5 h-5" />
+            <Link href="/d/new?example=1" className="btn-paper px-6 py-3.5 text-[15px]">
+              Try the example
+              <IconSparkles className="w-5 h-5" />
             </Link>
           </div>
         </section>
